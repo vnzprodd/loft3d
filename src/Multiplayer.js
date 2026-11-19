@@ -22,19 +22,21 @@ function colorFromName(str) {
     return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function makeNameSprite(name, bubbleText = '') {
+function makeNameSprite(name, bubbleText = '', isMobile = false) {
+    const scale = isMobile ? 256 / 384 : 1;
     const canvas = document.createElement('canvas');
-    canvas.width = 384;
-    canvas.height = 144;
+    canvas.width = Math.round(384 * scale);
+    canvas.height = Math.round(144 * scale);
     const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, 384, 144);
 
     if (bubbleText) {
         const trimmed = bubbleText.length > 34 ? bubbleText.slice(0, 33) + '…' : bubbleText;
         ctx.font = '600 18px "Segoe UI", sans-serif';
         const bw = Math.min(360, ctx.measureText(trimmed).width + 28);
-        const bx = (canvas.width - bw) / 2;
+        const bx = (384 - bw) / 2;
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
         ctx.beginPath();
@@ -44,13 +46,13 @@ function makeNameSprite(name, bubbleText = '') {
         ctx.fillStyle = '#111318';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(trimmed, canvas.width / 2, 28);
+        ctx.fillText(trimmed, 192, 28);
     }
 
     ctx.font = '700 23px "Segoe UI", sans-serif';
     const textW = ctx.measureText(name).width;
     const pillW = Math.min(345, textW + 34);
-    const pillX = (canvas.width - pillW) / 2;
+    const pillX = (384 - pillW) / 2;
 
     ctx.fillStyle = 'rgba(12, 13, 16, 0.85)';
     ctx.beginPath();
@@ -64,9 +66,13 @@ function makeNameSprite(name, bubbleText = '') {
     ctx.fillStyle = '#f2f3f5';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(name, canvas.width / 2, 82);
+    ctx.fillText(name, 192, 82);
 
     const tex = new THREE.CanvasTexture(canvas);
+    if (isMobile) {
+        tex.generateMipmaps = false;
+        tex.minFilter = THREE.LinearFilter;
+    }
     tex.needsUpdate = true;
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(mat);
@@ -75,48 +81,42 @@ function makeNameSprite(name, bubbleText = '') {
     return sprite;
 }
 
-function createGeometricAvatar(name, colorHex, castShadow = true) {
+function createGeometricAvatar(name, colorHex, isMobile = false) {
     const root = new THREE.Group();
 
-    const bodyMat = new THREE.MeshStandardMaterial({
-        color: colorHex,
-        roughness: 0.42,
-        metalness: 0.25
-    });
-    const darkMat = new THREE.MeshStandardMaterial({
-        color: 0x16181d,
-        roughness: 0.5,
-        metalness: 0.6
-    });
-    const visorMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xaad8ff,
-        emissiveIntensity: 0.9,
-        roughness: 0.2
-    });
+    const bodyMat = isMobile
+        ? new THREE.MeshLambertMaterial({ color: colorHex })
+        : new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.42, metalness: 0.25 });
+    const darkMat = isMobile
+        ? new THREE.MeshLambertMaterial({ color: 0x16181d })
+        : new THREE.MeshStandardMaterial({ color: 0x16181d, roughness: 0.5, metalness: 0.6 });
+    const visorMat = new THREE.MeshBasicMaterial({ color: 0xaad8ff });
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.58, 4, 10), bodyMat);
+    const torso = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.26, 0.58, isMobile ? 2 : 4, isMobile ? 6 : 10),
+        bodyMat
+    );
     torso.position.y = 0.86;
-    torso.castShadow = castShadow;
+    torso.castShadow = !isMobile;
     root.add(torso);
 
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.34, 0.36), darkMat);
     head.position.y = 1.56;
-    head.castShadow = castShadow;
+    head.castShadow = !isMobile;
     root.add(head);
 
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.09, 0.04), visorMat);
     visor.position.set(0, 1.57, -0.18);
     root.add(visor);
 
-    const handGeo = new THREE.SphereGeometry(0.085, 8, 8);
+    const handGeo = new THREE.SphereGeometry(0.085, isMobile ? 5 : 8, isMobile ? 5 : 8);
     const leftHand = new THREE.Mesh(handGeo, bodyMat);
     leftHand.position.set(-0.38, 0.88, -0.08);
     const rightHand = new THREE.Mesh(handGeo, bodyMat);
     rightHand.position.set(0.38, 0.88, -0.08);
     root.add(leftHand, rightHand);
 
-    const label = makeNameSprite(name);
+    const label = makeNameSprite(name, '', isMobile);
     root.add(label);
 
     return { root, head, leftHand, rightHand, label, name, bubbleTimer: 0 };
@@ -144,7 +144,7 @@ export class MultiplayerManager {
         this.avatars = new Map();
 
         this.sendTimer = 0;
-        this.sendInterval = this.isMobile ? 1 / 20 : 1 / 30;
+        this.sendInterval = this.isMobile ? 1 / 15 : 1 / 30;
         this.destroyed = false;
         this.retryTimer = null;
 
@@ -374,7 +374,7 @@ export class MultiplayerManager {
         if (!playerInfo || playerInfo.id === this.myId) return;
         let av = this.avatars.get(playerInfo.id);
         if (!av) {
-            const meshData = createGeometricAvatar(playerInfo.name, playerInfo.color, !this.isMobile);
+            const meshData = createGeometricAvatar(playerInfo.name, playerInfo.color, this.isMobile);
             const s = playerInfo.state || { x: 0, y: 0, z: 6, yaw: 0, isSitting: false };
             meshData.root.position.set(s.x, s.y, s.z);
             meshData.root.rotation.y = s.yaw || 0;
@@ -434,7 +434,7 @@ export class MultiplayerManager {
         if (av.label.material.map) av.label.material.map.dispose();
         av.label.material.dispose();
 
-        av.label = makeNameSprite(av.name, text);
+        av.label = makeNameSprite(av.name, text, this.isMobile);
         av.root.add(av.label);
         av.bubbleTimer = 5.0;
     }
@@ -504,7 +504,7 @@ export class MultiplayerManager {
                     av.root.remove(av.label);
                     if (av.label.material.map) av.label.material.map.dispose();
                     av.label.material.dispose();
-                    av.label = makeNameSprite(av.name);
+                    av.label = makeNameSprite(av.name, '', this.isMobile);
                     av.root.add(av.label);
                 }
             }

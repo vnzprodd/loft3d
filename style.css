@@ -682,3 +682,23 @@ body {
     padding: 2px 7px;
     border-radius: 999px;
 }
+
+/* ---------- Otimização Mobile (remove blur pesado sobre o canvas WebGL) ---------- */
+body.is-mobile .menu-btn,
+body.is-mobile .instructions,
+body.is-mobile #chat,
+body.is-mobile #voice-pill,
+body.is-mobile #board-ui,
+body.is-mobile .pause-hud-btn,
+body.is-mobile #pause-menu {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.is-mobile #chat,
+body.is-mobile #voice-pill,
+body.is-mobile .instructions,
+body.is-mobile .pause-hud-btn,
+body.is-mobile .pause-card {
+    background: rgba(14, 15, 18, 0.94);
+}

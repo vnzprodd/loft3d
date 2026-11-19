@@ -31,6 +31,14 @@ export class MeetingRoom {
         });
     }
 
+    mat(opts) {
+        if (this.isMobile) {
+            const { roughness, metalness, ...rest } = opts;
+            return new THREE.MeshLambertMaterial(rest);
+        }
+        return new THREE.MeshStandardMaterial(opts);
+    }
+
     build() {
         const w = this.x1 - this.x0;
         const d = this.z1 - this.z0;
@@ -41,7 +49,7 @@ export class MeetingRoom {
         carpet.repeat.set(6, 8);
         const floor = new THREE.Mesh(
             new THREE.PlaneGeometry(w, d),
-            new THREE.MeshStandardMaterial({ map: carpet, roughness: 1 })
+            this.mat({ map: carpet, roughness: 1 })
         );
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(cx, 0.005, cz);
@@ -51,13 +59,13 @@ export class MeetingRoom {
         ceilTex.repeat.set(3, 4);
         const ceil = new THREE.Mesh(
             new THREE.PlaneGeometry(w, d),
-            new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 0.9 })
+            this.mat({ map: ceilTex, roughness: 0.9 })
         );
         ceil.rotation.x = Math.PI / 2;
         ceil.position.set(cx, this.ceilH, cz);
         this.scene.add(ceil);
 
-        const wallMat = new THREE.MeshStandardMaterial({
+        const wallMat = this.mat({
             map: makeConcreteTexture(0x8d8b87),
             roughness: 1,
             side: THREE.DoubleSide
@@ -86,7 +94,7 @@ export class MeetingRoom {
             );
         }
 
-        const skirtMat = new THREE.MeshStandardMaterial({ color: 0x3a3a38, roughness: 0.8 });
+        const skirtMat = this.mat({ color: 0x3a3a38, roughness: 0.8 });
         const skirt = (bw, bx, bz, rotY) => {
             const s = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.12, 0.04), skirtMat);
             s.position.set(bx, 0.06, bz);
@@ -97,7 +105,7 @@ export class MeetingRoom {
         skirt(d, this.x1 - 0.12, cz, Math.PI / 2);
         skirt(w, cx, this.z0 + 0.12, 0);
 
-        const jambMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.7 });
+        const jambMat = this.mat({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.7 });
         [3.1, 4.7].forEach(x => {
             const j = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.45, 0.26), jambMat);
             j.position.set(x, 1.22, -10);
@@ -114,17 +122,17 @@ export class MeetingRoom {
 
         const tableTex = makeWoodTexture(0xc79a5b);
         tableTex.repeat.set(3, 1);
-        const tableMat = new THREE.MeshStandardMaterial({ map: tableTex, roughness: 0.7 });
+        const tableMat = this.mat({ map: tableTex, roughness: 0.7 });
         const top = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.09, 2.0), tableMat);
         top.position.set(cx, 0.74, tableZ);
         this.scene.add(top);
 
-        const apronMat = new THREE.MeshStandardMaterial({ color: 0xa87f47, roughness: 0.8 });
+        const apronMat = this.mat({ color: 0xa87f47, roughness: 0.8 });
         const apron = new THREE.Mesh(new THREE.BoxGeometry(5.7, 0.12, 1.75), apronMat);
         apron.position.set(cx, 0.66, tableZ);
         this.scene.add(apron);
 
-        const legMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.5, metalness: 0.4 });
+        const legMat = this.mat({ color: 0x2a2a2a, roughness: 0.5, metalness: 0.4 });
         [[-2.7, -0.7], [2.7, -0.7], [-2.7, 0.7], [2.7, 0.7]].forEach(([dx, dz]) => {
             const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.1), legMat);
             leg.position.set(cx + dx, 0.35, tableZ + dz);
@@ -132,7 +140,7 @@ export class MeetingRoom {
         });
         this.world.addCollider(cx, tableZ, 6.0, 2.0, 0, 0.85);
 
-        const matSeat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.85 });
+        const matSeat = this.mat({ color: 0x151515, roughness: 0.85 });
         const chairAt = (x, z, ry) => {
             const g = new THREE.Group();
 
@@ -190,8 +198,8 @@ export class MeetingRoom {
         screenGlow.rotation.set(-0.25, 0.25, 0);
         this.scene.add(laptopBase, laptopLid, screenGlow);
 
-        const potMat = new THREE.MeshStandardMaterial({ color: 0x7d7a74, roughness: 0.9 });
-        const leafMat = new THREE.MeshStandardMaterial({ color: 0x35672f, roughness: 1 });
+        const potMat = this.mat({ color: 0x7d7a74, roughness: 0.9 });
+        const leafMat = this.mat({ color: 0x35672f, roughness: 1 });
         [[this.x0 + 0.7, this.z0 + 0.9], [this.x1 - 0.7, this.z0 + 0.9]].forEach(([x, z]) => {
             const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.42, 8), potMat);
             pot.position.set(x, 0.21, z);
@@ -213,7 +221,7 @@ export class MeetingRoom {
         [-1.5, 1.5].forEach(dx => {
             const shade = new THREE.Mesh(
                 new THREE.ConeGeometry(0.22, 0.24, 10, 1, true),
-                new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide })
+                this.mat({ color: 0x1a1a1a, roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide })
             );
             shade.position.set(cx + dx, 2.85, -17.5);
             this.scene.add(shade);
@@ -227,7 +235,7 @@ export class MeetingRoom {
 
             const wire = new THREE.Mesh(
                 new THREE.CylinderGeometry(0.008, 0.008, this.ceilH - 2.95, 6),
-                new THREE.MeshStandardMaterial({ color: 0x111111 })
+                this.mat({ color: 0x111111 })
             );
             wire.position.set(cx + dx, (this.ceilH + 2.95) / 2, -17.5);
             this.scene.add(wire);
@@ -239,12 +247,14 @@ export class MeetingRoom {
             }
         });
 
-        const wash = new THREE.SpotLight(0xffffff, 16, 9, Math.PI / 5, 0.5, 1.6);
-        wash.position.set(cx, this.ceilH - 0.1, this.z0 + 1.6);
-        wash.target.position.set(cx, 1.6, this.z0);
-        this.scene.add(wash, wash.target);
+        if (!this.isMobile) {
+            const wash = new THREE.SpotLight(0xffffff, 16, 9, Math.PI / 5, 0.5, 1.6);
+            wash.position.set(cx, this.ceilH - 0.1, this.z0 + 1.6);
+            wash.target.position.set(cx, 1.6, this.z0);
+            this.scene.add(wash, wash.target);
+        }
 
-        const tvFrameMat = new THREE.MeshStandardMaterial({
+        const tvFrameMat = this.mat({
             color: 0x090a0c, roughness: 0.38, metalness: 0.72
         });
         const tvFrame = new THREE.Mesh(
@@ -269,11 +279,11 @@ export class MeetingRoom {
             const glow = new THREE.PointLight(0x4466ff, 2.2, 4.5);
             glow.position.set(this.x0 + 0.42, 2.0, -17.5);
             this.scene.add(glow);
-        }
 
-        const fill = new THREE.PointLight(0xdfe6f0, this.isMobile ? 14 : 8, 15, 1.8);
-        fill.position.set(cx, 2.9, -17.5);
-        this.scene.add(fill);
+            const fill = new THREE.PointLight(0xdfe6f0, 8, 15, 1.8);
+            fill.position.set(cx, 2.9, -17.5);
+            this.scene.add(fill);
+        }
     }
 
     update(playerPos) {

@@ -1,17 +1,25 @@
 import * as THREE from 'three';
 
-// Câmera em primeira pessoa: o mouse gira a visão (clique na tela para "prender" o mouse).
-// Setas do teclado também giram a câmera, caso o navegador bloqueie o mouse.
+const isMobileDevice = () =>
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
 export class CameraManager {
     constructor(scene, player, domElement = document.body) {
         this.scene = scene;
         this.player = player;
         this.dom = domElement;
+        const isMobile = isMobileDevice();
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 600);
+        this.camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            isMobile ? 150 : 600
+        );
         this.scene.add(this.camera);
 
-        this.yaw = 0;      // olhando para -z
+        this.yaw = 0;
         this.pitch = 0;
         this.sensitivity = 0.0022;
         this.eyeHeight = 1.55;
@@ -26,7 +34,6 @@ export class CameraManager {
         };
         document.addEventListener('mousemove', this.onMouseMove);
 
-        // clicar na cena prende o mouse de novo (depois do Esc, chat ou quadro)
         this.dom.addEventListener('click', () => {
             if (!window.__loftFrozen && !this.isTyping()) this.lock();
         });
@@ -56,7 +63,7 @@ export class CameraManager {
     lock() {
         try {
             const r = this.dom.requestPointerLock();
-            if (r && r.catch) r.catch(() => { /* o navegador recusou; setas continuam funcionando */ });
+            if (r && r.catch) r.catch(() => {});
         } catch (err) {
             console.warn('Não foi possível prender o mouse:', err);
         }
@@ -79,7 +86,6 @@ export class CameraManager {
         this.camera.position.set(p.x, p.y + eye, p.z);
         this.applyRotation();
 
-        // o corpo acompanha para onde você olha
         if (!this.player.isSitting) this.player.group.rotation.y = this.yaw;
     }
 }

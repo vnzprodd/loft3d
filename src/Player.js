@@ -8,9 +8,14 @@ const JUMP_FORCE = 6.2;
 const PLAYER_RADIUS = 0.35;
 const EYE_HEIGHT = 1.55;
 
+const isMobileDevice = () =>
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
 export class Player {
     constructor(scene) {
         this.scene = scene;
+        this.isMobile = isMobileDevice();
         this.group = new THREE.Group();
         this.camera = null;   // set by main.js
         this.world = null;    // set by main.js
@@ -41,11 +46,11 @@ export class Player {
     }
 
     setupModel() {
-        // --- fallback chibi (replaced by the FBX once loaded) ---
-        const matHoodie = new THREE.MeshStandardMaterial({ color: 0x6e6e6e, roughness: 0.9 });
-        const matPants = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
-        const matSkin = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.6 });
-        const matShoe = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.7 });
+        const MatClass = this.isMobile ? THREE.MeshLambertMaterial : THREE.MeshStandardMaterial;
+        const matHoodie = new MatClass({ color: 0x6e6e6e, ...(this.isMobile ? {} : { roughness: 0.9 }) });
+        const matPants = new MatClass({ color: 0x111111, ...(this.isMobile ? {} : { roughness: 0.9 }) });
+        const matSkin = new MatClass({ color: 0x1c1c1c, ...(this.isMobile ? {} : { roughness: 0.6 }) });
+        const matShoe = new MatClass({ color: 0xdddddd, ...(this.isMobile ? {} : { roughness: 0.7 }) });
         const matEye = new THREE.MeshBasicMaterial({ color: 0xff2d78 });
 
         const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.42), matHoodie);
@@ -76,20 +81,21 @@ export class Player {
             this.group.add(shoe);
         });
 
-        this.group.traverse(o => { o.castShadow = true; });
+        this.group.traverse(o => { o.castShadow = !this.isMobile; });
         this.applyFirstPersonVisibility();
 
-        // --- load the real FBX character ---
+        // No celular, não carrega o FBX pesado em primeira pessoa (economiza RAM/VRAM e GPU)
+        if (this.isMobile) return;
+
+        // --- load the real FBX character (desktop) ---
         new FBXLoader().load(fbxUrl, (obj) => {
-            // normalize scale to ~1.75m tall, feet at y=0
             const box = new THREE.Box3().setFromObject(obj);
             const h = box.max.y - box.min.y;
             const s = 1.75 / h;
             obj.scale.setScalar(s);
             obj.position.y = -box.min.y * s;
-            obj.rotation.y = Math.PI; // face -z like the movement forward
+            obj.rotation.y = Math.PI;
 
-            // apply textures.png to any material without a map
             const tex = new THREE.TextureLoader().load(texUrl, (t) => {
                 t.flipY = false;
                 t.colorSpace = THREE.SRGBColorSpace;
@@ -105,14 +111,12 @@ export class Player {
                 }
             });
 
-            // remove fallback chibi, add FBX
             while (this.group.children.length) this.group.remove(this.group.children[0]);
             this.group.add(obj);
             this.applyFirstPersonVisibility();
         }, undefined, (err) => console.error('Falha ao carregar o personagem FBX:', err));
     }
 
-    // In first person, hide everything above the waist so looking down shows the legs
     applyFirstPersonVisibility() {
         const box = new THREE.Box3();
         const center = new THREE.Vector3();
@@ -132,7 +136,6 @@ export class Player {
         };
 
         window.addEventListener('keydown', (e) => {
-            // não anda enquanto escreve no chat ou com o quadro aberto
             if (typing() || window.__loftFrozen) return;
             const k = e.key.toLowerCase();
             if (k in this.keys) this.keys[k] = true;
@@ -150,7 +153,6 @@ export class Player {
             if (k in this.keys) this.keys[k] = false;
         });
 
-        // ao abrir o chat ou o quadro, solta as teclas para não sair andando
         window.addEventListener('loft-freeze', () => {
             this.keys.w = this.keys.a = this.keys.s = this.keys.d = false;
             this.velocity.set(0, 0, 0);
@@ -225,8 +227,6 @@ export class Player {
             const colliderMinY = Number.isFinite(c.minY) ? c.minY : 0;
             const colliderMaxY = Number.isFinite(c.maxY) ? c.maxY : colliderMinY + 3;
 
-            // Considera a altura real do obstáculo e a altura do personagem.
-            // Isso impede que colisores do térreo afetem objetos do pavimento superior.
             if (p.y + playerHeight <= colliderMinY || p.y >= colliderMaxY) continue;
 
             const minX = c.minX - PLAYER_RADIUS;
@@ -238,7 +238,6 @@ export class Player {
             const insideZ = p.z > minZ && p.z < maxZ;
 
             if (!insideX || !insideZ) {
-                // Colisão varrida simples: evita atravessar paredes finas em um frame lento.
                 const crossedX =
                     ((oldX <= minX && p.x >= maxX) || (oldX >= maxX && p.x <= minX)) &&
                     p.z > minZ && p.z < maxZ;
@@ -256,8 +255,6 @@ export class Player {
                 continue;
             }
 
-            // Primeiro tenta expulsar o personagem pelo lado de onde ele veio.
-            // Só usa a menor penetração se ele já começou o frame dentro do collider.
             if (oldX <= minX) {
                 p.x = minX;
                 this.velocity.x = 0;
@@ -294,15 +291,12 @@ export class Player {
             return;
         }
 
-        // --- input ---
         let ix = 0, iz = 0;
         if (this.keys.w) iz -= 1;
         if (this.keys.s) iz += 1;
         if (this.keys.a) ix -= 1;
         if (this.keys.d) ix += 1;
 
-        // Analógico do celular: só vale se o teclado não estiver sendo usado.
-        // A força (0 a 1) controla a velocidade: empurrar pouco = andar devagar.
         let strength = 1;
         const ti = this.touchInput;
         if (ti && ix === 0 && iz === 0 && !window.__loftFrozen && (ti.x !== 0 || ti.y !== 0)) {
@@ -312,19 +306,16 @@ export class Player {
         }
         const moving = ix !== 0 || iz !== 0;
 
-        // camera-relative direction (pure vector math — no trig sign bugs):
-        // W = camera forward, S = backward, D = right, A = left
         const dir = new THREE.Vector3();
         if (moving) {
             const fwd = this.camera.getWorldDirection(new THREE.Vector3());
             fwd.y = 0;
             if (fwd.lengthSq() < 0.0001) fwd.set(0, 0, -1);
             fwd.normalize();
-            const right = new THREE.Vector3(-fwd.z, 0, fwd.x); // fwd rotated -90° = right
+            const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
             dir.copy(fwd).multiplyScalar(-iz).addScaledVector(right, ix).normalize().multiplyScalar(strength);
         }
 
-        // --- horizontal movement with smoothing ---
         const targetVel = dir.multiplyScalar(this.speed);
         this.velocity.lerp(targetVel, Math.min(1, this.accel * dt));
         const previousX = p.x;
@@ -333,9 +324,6 @@ export class Player {
 
         this.resolveCollisions(previousX, previousZ);
 
-        // --- bounds: escada / galeria / interior / exterior ---
-        // A altura dos degraus ultrapassa 2,2 m antes do patamar. Não aplicar
-        // os limites do piso superior enquanto o personagem ainda está na escada.
         const onStairs = this.world.isOnStairs
             ? this.world.isOnStairs(p.x, p.z)
             : (p.x > -1.05 && p.x < 1.05 && p.z >= -3.42 && p.z <= 3.02);
@@ -344,20 +332,11 @@ export class Player {
             p.x = THREE.MathUtils.clamp(p.x, -0.82, 0.82);
             p.z = THREE.MathUtils.clamp(p.z, -3.42, 3.02);
         } else if (p.y > 2.2) {
-            // Pavimento superior completo: mezanino (z=-10..-3.2)
-            // conectado à galeria de modelagens (z=-25..-10).
-            // O limite antigo terminava em x=1.1 e z=-9.6, criando uma
-            // parede invisível à direita e bloqueando a entrada da galeria.
-            // As paredes e guarda-corpos reais continuam controlados pelos
-            // colliders do World; estes limites só evitam sair do piso.
             p.x = THREE.MathUtils.clamp(p.x, -7.45, 7.45);
             p.z = THREE.MathUtils.clamp(p.z, -24.5, -3.05);
         } else {
             p.x = THREE.MathUtils.clamp(p.x, -7.6, 40);
 
-            // A sala de reunião ocupa x=0.5..12 e z=-25..-10.
-            // O limite antigo terminava em x=7.9 e z=-16.6: ao cruzar esse
-            // recorte o personagem era reposicionado bruscamente.
             const canGoDeep = p.x > 0.6 && p.x < 12.2;
             if (p.x < 8) {
                 p.z = THREE.MathUtils.clamp(p.z, canGoDeep ? -25.5 : -9.6, 9.6);
@@ -365,14 +344,11 @@ export class Player {
                 p.z = THREE.MathUtils.clamp(p.z, -25.5, 25);
             }
 
-            // Dentro da profundidade da sala, segura o personagem antes das
-            // paredes laterais sem afetar a passagem pela porta frontal.
             if (p.z < -10.2 && p.z > -24.8) {
                 p.x = THREE.MathUtils.clamp(p.x, 0.96, 11.54);
             }
         }
 
-        // --- vertical: gravity, jump, ground (stairs/mezzanine) ---
         this.vy += GRAVITY * dt;
         p.y += this.vy * dt;
 
@@ -393,7 +369,6 @@ export class Player {
             this.jumpQueued = false;
         }
 
-        // --- footsteps ---
         if (moving && this.onGround) {
             this.stepTimer += dt;
             if (this.stepTimer >= 0.32) {

@@ -10,30 +10,41 @@ import { VoiceChat } from './VoiceChat.js';
 import { MultiplayerManager } from './Multiplayer.js';
 import { TouchControls } from './TouchControls.js';
 
+export const IS_MOBILE = typeof window !== 'undefined' &&
+    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
 class Experience {
     constructor() {
         this.container = document.getElementById('app');
         this.prompt = document.getElementById('audio-prompt');
         this.started = false;
         this.paused = false;
+        this.frameCount = 0;
+        this.mobilePixelRatio = 0.65;
+        this.slowFrames = 0;
 
-        const isMobile = window.matchMedia('(pointer: coarse)').matches ||
-            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        this.isMobile = isMobile;
+        if (IS_MOBILE && document.body) {
+            document.body.classList.add('is-mobile');
+        }
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87b5dd);
-        this.scene.fog = new THREE.FogExp2(0x87b5dd, 0.006);
+        this.scene.fog = new THREE.FogExp2(0x87b5dd, IS_MOBILE ? 0.0085 : 0.006);
 
         this.renderer = new THREE.WebGLRenderer({
-            antialias: !isMobile,
+            antialias: !IS_MOBILE,
             stencil: false,
+            precision: IS_MOBILE ? 'mediump' : 'highp',
             powerPreference: 'high-performance'
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio || 1, 1.75));
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+        this.renderer.setPixelRatio(
+            IS_MOBILE ? this.mobilePixelRatio : Math.min(window.devicePixelRatio || 1, 1.75)
+        );
+        this.renderer.shadowMap.enabled = !IS_MOBILE;
+        if (!IS_MOBILE) {
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        }
         this.container.appendChild(this.renderer.domElement);
 
         this.clock = new THREE.Clock();
@@ -101,11 +112,105 @@ class Experience {
         this.world.meetingRoom = this.meetingRoom;
         this.projector.addMirrorScreen(this.meetingRoom.transmissionScreen);
 
+        if (IS_MOBILE) {
+            this.optimizeSceneForMobile();
+        }
+
         window.addEventListener('resize', () => this.onWindowResize());
 
         window.addEventListener('beforeunload', () => {
             if (this.multiplayer) this.multiplayer.disconnect();
         });
+    }
+
+    optimizeSceneForMobile() {
+        const materialCache = new Map();
+        const lightsToRemove = [];
+        let keptPointLights = 0;
+
+        const optimizeTexture = (tex) => {
+            if (!tex) return;
+            tex.anisotropy = 1;
+            if (tex.isCanvasTexture || tex.isVideoTexture) {
+                tex.generateMipmaps = false;
+                tex.minFilter = THREE.LinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                tex.needsUpdate = true;
+            }
+        };
+
+        const convertMaterial = (mat) => {
+            if (!mat) return mat;
+            if (materialCache.has(mat)) return materialCache.get(mat);
+
+            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                const fastMat = new THREE.MeshLambertMaterial({
+                    color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+                    map: mat.map || null,
+                    emissive: mat.emissive ? mat.emissive.clone() : new THREE.Color(0x000000),
+                    emissiveMap: mat.emissiveMap || null,
+                    emissiveIntensity: mat.emissiveIntensity ?? 1,
+                    transparent: mat.transparent,
+                    opacity: mat.opacity,
+                    alphaMap: mat.alphaMap || null,
+                    alphaTest: mat.alphaTest,
+                    side: mat.side,
+                    vertexColors: mat.vertexColors,
+                    fog: mat.fog,
+                    toneMapped: mat.toneMapped,
+                    depthWrite: mat.depthWrite,
+                    depthTest: mat.depthTest,
+                    flatShading: mat.flatShading
+                });
+
+                optimizeTexture(fastMat.map);
+                optimizeTexture(fastMat.emissiveMap);
+                optimizeTexture(fastMat.alphaMap);
+
+                materialCache.set(mat, fastMat);
+                mat.dispose();
+                return fastMat;
+            }
+
+            optimizeTexture(mat.map);
+            optimizeTexture(mat.emissiveMap);
+            materialCache.set(mat, mat);
+            return mat;
+        };
+
+        this.scene.traverse((obj) => {
+            obj.castShadow = false;
+            obj.receiveShadow = false;
+
+            if (obj.isLight) {
+                if (obj.isAmbientLight || obj.isHemisphereLight) {
+                    obj.intensity *= 1.35;
+                } else if (obj.isDirectionalLight) {
+                    obj.castShadow = false;
+                } else if (obj.isSpotLight) {
+                    lightsToRemove.push(obj);
+                } else if (obj.isPointLight) {
+                    if (keptPointLights < 2) {
+                        keptPointLights++;
+                    } else {
+                        lightsToRemove.push(obj);
+                    }
+                }
+            }
+
+            if (obj.isMesh && obj.material) {
+                if (Array.isArray(obj.material)) {
+                    obj.material = obj.material.map(convertMaterial);
+                } else {
+                    obj.material = convertMaterial(obj.material);
+                }
+            }
+        });
+
+        for (const light of lightsToRemove) {
+            if (light.parent) light.parent.remove(light);
+            if (light.target && light.target.parent) light.target.parent.remove(light.target);
+        }
     }
 
     async copyInviteLink(button, originalLabel) {
@@ -275,6 +380,9 @@ class Experience {
 
     onWindowResize() {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+        if (IS_MOBILE) {
+            this.renderer.setPixelRatio(this.mobilePixelRatio);
+        }
         this.cameraManager.camera.aspect = window.innerWidth / window.innerHeight;
         this.cameraManager.camera.updateProjectionMatrix();
     }
@@ -282,15 +390,37 @@ class Experience {
     render() {
         if (!this.started) return;
 
-        // Trava o deltaTime em 0.1s para evitar saltos em engasgos no celular
-        const deltaTime = Math.min(this.clock.getDelta(), 0.1);
+        requestAnimationFrame(() => this.render());
+
+        if (document.hidden) return;
+
+        const rawDelta = this.clock.getDelta();
+        const deltaTime = Math.min(rawDelta, 0.1);
+        this.frameCount++;
+
+        // Ajuste automático se o celular cair abaixo de ~22 FPS
+        if (IS_MOBILE && !this.paused && this.mobilePixelRatio > 0.5) {
+            if (rawDelta > 0.045) {
+                this.slowFrames++;
+                if (this.slowFrames > 45) {
+                    this.slowFrames = 0;
+                    this.mobilePixelRatio = 0.52;
+                    this.renderer.setPixelRatio(this.mobilePixelRatio);
+                }
+            } else {
+                this.slowFrames = Math.max(0, this.slowFrames - 1);
+            }
+        }
 
         if (!this.paused) {
             this.player.update(deltaTime);
             this.cameraManager.update(deltaTime);
-            this.tvPyramid.update(this.player.group.position);
-            this.projector.update(this.player.group.position);
-            this.meetingRoom.update(this.player.group.position);
+
+            if (!IS_MOBILE || this.frameCount % 2 === 0) {
+                this.tvPyramid.update(this.player.group.position);
+                this.projector.update(this.player.group.position);
+                this.meetingRoom.update(this.player.group.position);
+            }
         }
 
         if (this.multiplayer) {
@@ -309,8 +439,6 @@ class Experience {
         if (this.loadingOverlay && this.loadingOverlay.classList.contains('active')) {
             this.loadingOverlay.classList.remove('active');
         }
-
-        requestAnimationFrame(() => this.render());
     }
 }
 
