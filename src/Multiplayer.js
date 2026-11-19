@@ -392,7 +392,12 @@ export class MultiplayerManager {
                 targetPos: new THREE.Vector3(s.x, s.y, s.z),
                 targetYaw: s.yaw || 0,
                 isSitting: !!s.isSitting,
-                walkPhase: 0
+                walkPhase: 0,
+                vel: new THREE.Vector3(),
+                predicted: new THREE.Vector3(s.x, s.y, s.z),
+                lastX: s.x, lastY: s.y, lastZ: s.z,
+                lastStateTime: performance.now(),
+                sinceState: 0
             };
             this.avatars.set(playerInfo.id, av);
         }
@@ -407,6 +412,25 @@ export class MultiplayerManager {
             av = this.avatars.get(id);
         }
         if (!av) return;
+        // Estima a velocidade do outro jogador pelos dois últimos pacotes.
+        // Entre um pacote e outro o avatar continua andando nessa direção,
+        // em vez de esperar parado e "pular" quando a próxima posição chega.
+        const now = performance.now();
+        const gap = (now - av.lastStateTime) / 1000;
+        if (gap > 0.005 && gap < 0.5) {
+            const nvx = (state.x - av.lastX) / gap;
+            const nvy = (state.y - av.lastY) / gap;
+            const nvz = (state.z - av.lastZ) / gap;
+            av.vel.x += (nvx - av.vel.x) * 0.6;
+            av.vel.y += (nvy - av.vel.y) * 0.6;
+            av.vel.z += (nvz - av.vel.z) * 0.6;
+        } else {
+            av.vel.set(0, 0, 0);
+        }
+        av.lastX = state.x; av.lastY = state.y; av.lastZ = state.z;
+        av.lastStateTime = now;
+        av.sinceState = 0;
+
         av.targetPos.set(state.x, state.y, state.z);
         av.targetYaw = state.yaw || 0;
         av.isSitting = !!state.isSitting;
@@ -443,9 +467,9 @@ export class MultiplayerManager {
     }
 
     update(dt, localState) {
-        // 1. Envia nossa posição 20x por segundo
+        // 1. Envia nossa posição 30x por segundo
         this.sendTimer += dt;
-        if (this.sendTimer >= 0.05 && this.myId && localState) {
+        if (this.sendTimer >= 1 / 30 && this.myId && localState) {
             this.sendTimer = 0;
             if (this.isHost) {
                 const me = this.roster.get(this.myId);
@@ -459,10 +483,19 @@ export class MultiplayerManager {
         }
 
         // 2. Suaviza movimento dos avatares remotos
-        const lerpAlpha = Math.min(1, dt * 14);
+        const lerpAlpha = 1 - Math.exp(-dt * 20);   // suavização independente da taxa de quadros
         for (const av of this.avatars.values()) {
-            const dist = av.root.position.distanceTo(av.targetPos);
-            av.root.position.lerp(av.targetPos, lerpAlpha);
+            // posição prevista = última posição recebida + velocidade * tempo desde o pacote
+            av.sinceState += dt;
+            const ahead = Math.min(av.sinceState, 0.1);
+            av.predicted.copy(av.targetPos).addScaledVector(av.vel, ahead);
+
+            // teletransporte (ex.: sentou, reconectou): não desliza, vai direto
+            if (av.root.position.distanceTo(av.predicted) > 5) {
+                av.root.position.copy(av.predicted);
+            }
+            av.root.position.lerp(av.predicted, lerpAlpha);
+            const moving = av.vel.lengthSq() > 0.09;
 
             // Interpolação angular pelo menor arco
             let diff = av.targetYaw - av.root.rotation.y;
@@ -471,7 +504,7 @@ export class MultiplayerManager {
             av.root.rotation.y += diff * lerpAlpha;
 
             // Animação leve das mãos ao andar
-            if (dist > 0.015 && !av.isSitting) {
+            if (moving && !av.isSitting) {
                 av.walkPhase += dt * 11;
                 av.leftHand.position.z = -0.08 + Math.sin(av.walkPhase) * 0.12;
                 av.rightHand.position.z = -0.08 - Math.sin(av.walkPhase) * 0.12;

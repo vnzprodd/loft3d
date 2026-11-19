@@ -28,6 +28,7 @@ export class Player {
         this.sitRotation = 0;
 
         this.keys = { w: false, a: false, s: false, d: false };
+        this.touchInput = null; // {x, y} do analógico do celular (definido pelo TouchControls)
 
         this.setupModel();
         this.setupControls();
@@ -299,6 +300,16 @@ export class Player {
         if (this.keys.s) iz += 1;
         if (this.keys.a) ix -= 1;
         if (this.keys.d) ix += 1;
+
+        // Analógico do celular: só vale se o teclado não estiver sendo usado.
+        // A força (0 a 1) controla a velocidade: empurrar pouco = andar devagar.
+        let strength = 1;
+        const ti = this.touchInput;
+        if (ti && ix === 0 && iz === 0 && !window.__loftFrozen && (ti.x !== 0 || ti.y !== 0)) {
+            ix = ti.x;
+            iz = ti.y;
+            strength = Math.min(1, Math.hypot(ti.x, ti.y));
+        }
         const moving = ix !== 0 || iz !== 0;
 
         // camera-relative direction (pure vector math — no trig sign bugs):
@@ -310,7 +321,7 @@ export class Player {
             if (fwd.lengthSq() < 0.0001) fwd.set(0, 0, -1);
             fwd.normalize();
             const right = new THREE.Vector3(-fwd.z, 0, fwd.x); // fwd rotated -90° = right
-            dir.copy(fwd).multiplyScalar(-iz).addScaledVector(right, ix).normalize();
+            dir.copy(fwd).multiplyScalar(-iz).addScaledVector(right, ix).normalize().multiplyScalar(strength);
         }
 
         // --- horizontal movement with smoothing ---

@@ -8,6 +8,7 @@ import { MeetingRoom } from './MeetingRoom.js';
 import { Chat } from './Chat.js';
 import { VoiceChat } from './VoiceChat.js';
 import { MultiplayerManager } from './Multiplayer.js';
+import { TouchControls } from './TouchControls.js';
 
 class Experience {
     constructor() {
@@ -22,7 +23,9 @@ class Experience {
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        // Celular: limite menor de resolução para andar mais fluido
+        const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isTouchDevice ? 1.25 : 1.75));
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
@@ -76,6 +79,14 @@ class Experience {
 
         this.cameraManager = new CameraManager(this.scene, this.player, this.renderer.domElement);
         this.player.camera = this.cameraManager.camera;
+
+        // Controles de toque (só aparecem no celular/tablet, depois de Iniciar)
+        this.touch = new TouchControls({
+            player: this.player,
+            cameraManager: this.cameraManager,
+            dom: this.renderer.domElement,
+            onPause: () => this.pause()
+        });
 
         this.tvPyramid = new TVPyramid(this.scene, new THREE.Vector3(-6.8, 0, 7.5), this.world.colliders);
         this.tvPyramid.setListener(this.cameraManager.camera);
@@ -177,6 +188,7 @@ class Experience {
             });
 
             this.started = true;
+            if (this.touch) this.touch.show();
             if (this.loadingOverlay) this.loadingOverlay.classList.add('active');
             btnStart.disabled = true;
             menu.style.display = 'none';
