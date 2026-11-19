@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { World } from './World.js';
 import { Player } from './Player.js';
 import { CameraManager } from './CameraManager.js';
@@ -20,8 +21,10 @@ class Experience {
         this.started = false;
         this.paused = false;
         this.frameCount = 0;
-        this.mobilePixelRatio = 0.65;
+        this.mobilePixelRatio = 0.72;
         this.slowFrames = 0;
+        this.fastFrames = 0;
+        this.exteriorSmallProps = [];
 
         if (IS_MOBILE && document.body) {
             document.body.classList.add('is-mobile');
@@ -29,7 +32,7 @@ class Experience {
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87b5dd);
-        this.scene.fog = new THREE.FogExp2(0x87b5dd, IS_MOBILE ? 0.0085 : 0.006);
+        this.scene.fog = new THREE.FogExp2(0x87b5dd, IS_MOBILE ? 0.0165 : 0.006);
 
         this.renderer = new THREE.WebGLRenderer({
             antialias: !IS_MOBILE,
@@ -139,6 +142,20 @@ class Experience {
             }
         };
 
+        const cleanTransparency = (mat) => {
+            if (!mat) return;
+            const hasAlphaTexture = Boolean(mat.alphaMap) ||
+                (mat.map && mat.map.format === THREE.RGBAFormat && mat.alphaTest > 0);
+            if (mat.transparent && (mat.opacity === undefined || mat.opacity >= 0.98) && !hasAlphaTexture) {
+                mat.transparent = false;
+                mat.depthWrite = true;
+            }
+            if (mat.transparent) {
+                mat.depthWrite = false;
+                mat.side = THREE.FrontSide;
+            }
+        };
+
         const convertMaterial = (mat) => {
             if (!mat) return mat;
             if (materialCache.has(mat)) return materialCache.get(mat);
@@ -166,6 +183,7 @@ class Experience {
                 optimizeTexture(fastMat.map);
                 optimizeTexture(fastMat.emissiveMap);
                 optimizeTexture(fastMat.alphaMap);
+                cleanTransparency(fastMat);
 
                 materialCache.set(mat, fastMat);
                 mat.dispose();
@@ -174,6 +192,7 @@ class Experience {
 
             optimizeTexture(mat.map);
             optimizeTexture(mat.emissiveMap);
+            cleanTransparency(mat);
             materialCache.set(mat, mat);
             return mat;
         };
@@ -184,7 +203,7 @@ class Experience {
 
             if (obj.isLight) {
                 if (obj.isAmbientLight || obj.isHemisphereLight) {
-                    obj.intensity *= 1.35;
+                    obj.intensity *= 1.3;
                 } else if (obj.isDirectionalLight) {
                     obj.castShadow = false;
                 } else if (obj.isSpotLight) {
@@ -195,6 +214,16 @@ class Experience {
                     } else {
                         lightsToRemove.push(obj);
                     }
+                }
+            }
+
+            if (obj.isPoints && obj.geometry) {
+                const pos = obj.geometry.attributes.position;
+                if (pos && pos.count > 120) {
+                    obj.geometry.setDrawRange(0, 120);
+                }
+                if (obj.material && obj.material.size) {
+                    obj.material.size = Math.min(obj.material.size, 0.25);
                 }
             }
 
@@ -211,6 +240,131 @@ class Experience {
             if (light.parent) light.parent.remove(light);
             if (light.target && light.target.parent) light.target.parent.remove(light.target);
         }
+
+        this.batchStaticMeshesForMobile();
+    }
+
+    batchStaticMeshesForMobile() {
+        const mergeFn = BufferGeometryUtils.mergeGeometries || BufferGeometryUtils.mergeBufferGeometries;
+        if (!mergeFn) return;
+
+        this.scene.updateMatrixWorld(true);
+
+        const protectedObjects = new Set();
+        const protectTree = (root) => {
+            if (!root) return;
+            root.traverse((child) => protectedObjects.add(child));
+        };
+
+        protectTree(this.player?.group);
+        if (this.meetingRoom?.transmissionScreen) {
+            protectedObjects.add(this.meetingRoom.transmissionScreen);
+        }
+        if (this.meetingRoom?.whiteboard?.mesh) {
+            protectTree(this.meetingRoom.whiteboard.mesh);
+        }
+
+        const buckets = new Map();
+        const box = new THREE.Box3();
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+
+        this.scene.traverse((obj) => {
+            if (!obj.isMesh || !obj.visible || protectedObjects.has(obj)) return;
+            if (obj.isSkinnedMesh || obj.isInstancedMesh) return;
+            if (Array.isArray(obj.material) || !obj.material || !obj.geometry) return;
+            if (obj.matrixWorld.determinant() < 0) return;
+
+            const mat = obj.material;
+            if (mat.transparent) return;
+            if (mat.map?.isVideoTexture || mat.map?.isCanvasTexture) return;
+            if (mat.emissiveMap?.isVideoTexture || mat.emissiveMap?.isCanvasTexture) return;
+
+            box.setFromObject(obj);
+            if (box.isEmpty()) return;
+            box.getCenter(center);
+            box.getSize(size);
+
+            // Não mescla planos gigantes (chão/oceano/céu) junto com props pequenos
+            if (Math.max(size.x, size.z) > 45) return;
+
+            let zone = 'interior';
+            if (box.min.x <= 7.8 && box.max.x > 7.8) {
+                zone = 'shared';
+            } else if (center.x > 7.8) {
+                zone = 'exterior';
+            }
+
+            const key = `${zone}_${mat.uuid}`;
+            if (!buckets.has(key)) {
+                buckets.set(key, { mat, meshes: [] });
+            }
+            buckets.get(key).meshes.push(obj);
+        });
+
+        for (const { mat, meshes } of buckets.values()) {
+            if (meshes.length < 2) continue;
+
+            const needsUV = Boolean(mat.map || mat.emissiveMap || mat.alphaMap);
+            const normalized = [];
+            const validMeshes = [];
+
+            for (const mesh of meshes) {
+                const src = mesh.geometry;
+                if (!src.attributes.position) continue;
+                if (needsUV && !src.attributes.uv) continue;
+
+                const g = src.index ? src.toNonIndexed() : src.clone();
+                g.applyMatrix4(mesh.matrixWorld);
+                if (!g.attributes.normal) {
+                    g.computeVertexNormals();
+                }
+
+                for (const attrName of Object.keys(g.attributes)) {
+                    if (attrName === 'position' || attrName === 'normal') continue;
+                    if (attrName === 'uv' && needsUV) continue;
+                    g.deleteAttribute(attrName);
+                }
+
+                normalized.push(g);
+                validMeshes.push(mesh);
+            }
+
+            if (normalized.length < 2) {
+                normalized.forEach((g) => g.dispose());
+                continue;
+            }
+
+            const merged = mergeFn(normalized, false);
+            normalized.forEach((g) => g.dispose());
+            if (!merged) continue;
+
+            merged.computeBoundingSphere();
+            const batched = new THREE.Mesh(merged, mat);
+            batched.frustumCulled = true;
+            this.scene.add(batched);
+
+            for (const m of validMeshes) {
+                if (m.parent) m.parent.remove(m);
+                m.geometry.dispose();
+            }
+        }
+
+        // Registra objetos pequenos que ficaram soltos na praia para culling por distância
+        this.scene.traverse((obj) => {
+            if (!obj.isMesh || !obj.visible || protectedObjects.has(obj)) return;
+            box.setFromObject(obj);
+            if (box.isEmpty()) return;
+            box.getCenter(center);
+            box.getSize(size);
+            if (center.x > 8.5 && Math.max(size.x, size.y, size.z) < 2.2) {
+                this.exteriorSmallProps.push({
+                    mesh: obj,
+                    x: center.x,
+                    z: center.z
+                });
+            }
+        });
     }
 
     async copyInviteLink(button, originalLabel) {
@@ -398,23 +552,42 @@ class Experience {
         const deltaTime = Math.min(rawDelta, 0.1);
         this.frameCount++;
 
-        // Ajuste automático se o celular cair abaixo de ~22 FPS
-        if (IS_MOBILE && !this.paused && this.mobilePixelRatio > 0.5) {
-            if (rawDelta > 0.045) {
+        // Escala dinâmica de resolução no mobile para manter fluidez ao olhar para a praia
+        if (IS_MOBILE && !this.paused) {
+            if (rawDelta > 0.036) {
                 this.slowFrames++;
-                if (this.slowFrames > 45) {
+                this.fastFrames = 0;
+                if (this.slowFrames > 25 && this.mobilePixelRatio > 0.55) {
                     this.slowFrames = 0;
-                    this.mobilePixelRatio = 0.52;
+                    this.mobilePixelRatio = Math.max(0.55, +(this.mobilePixelRatio - 0.08).toFixed(2));
                     this.renderer.setPixelRatio(this.mobilePixelRatio);
                 }
-            } else {
+            } else if (rawDelta < 0.022) {
+                this.fastFrames++;
                 this.slowFrames = Math.max(0, this.slowFrames - 1);
+                if (this.fastFrames > 180 && this.mobilePixelRatio < 0.72) {
+                    this.fastFrames = 0;
+                    this.mobilePixelRatio = Math.min(0.72, +(this.mobilePixelRatio + 0.06).toFixed(2));
+                    this.renderer.setPixelRatio(this.mobilePixelRatio);
+                }
             }
         }
 
         if (!this.paused) {
             this.player.update(deltaTime);
             this.cameraManager.update(deltaTime);
+
+            if (IS_MOBILE && this.exteriorSmallProps.length > 0 && this.frameCount % 6 === 0) {
+                const px = this.player.group.position.x;
+                const pz = this.player.group.position.z;
+                const maxDistSq = 46 * 46;
+                for (let i = 0; i < this.exteriorSmallProps.length; i++) {
+                    const item = this.exteriorSmallProps[i];
+                    const dx = item.x - px;
+                    const dz = item.z - pz;
+                    item.mesh.visible = (dx * dx + dz * dz) <= maxDistSq;
+                }
+            }
 
             if (!IS_MOBILE || this.frameCount % 2 === 0) {
                 this.tvPyramid.update(this.player.group.position);

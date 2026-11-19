@@ -15,7 +15,7 @@ export class CameraManager {
             75,
             window.innerWidth / window.innerHeight,
             0.1,
-            isMobile ? 150 : 600
+            isMobile ? 85 : 600
         );
         this.scene.add(this.camera);
 
