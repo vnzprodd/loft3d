@@ -14,6 +14,18 @@ import { TouchControls } from './TouchControls.js';
 export const IS_MOBILE = typeof window !== 'undefined' &&
     (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
 
+// No Safari/Android, evita upload de VideoTexture (texImage2D) 60x por segundo
+if (IS_MOBILE && THREE.VideoTexture && !THREE.VideoTexture.prototype.__mobileThrottled) {
+    const origVideoUpdate = THREE.VideoTexture.prototype.update;
+    THREE.VideoTexture.prototype.update = function () {
+        const now = performance.now();
+        if (this.__lastMobileUpload && now - this.__lastMobileUpload < 80) return;
+        this.__lastMobileUpload = now;
+        origVideoUpdate.call(this);
+    };
+    THREE.VideoTexture.prototype.__mobileThrottled = true;
+}
+
 class Experience {
     constructor() {
         this.container = document.getElementById('app');
@@ -21,21 +33,23 @@ class Experience {
         this.started = false;
         this.paused = false;
         this.frameCount = 0;
-        this.mobilePixelRatio = 0.72;
+        this.mobilePixelRatio = 0.68;
         this.slowFrames = 0;
         this.fastFrames = 0;
         this.exteriorSmallProps = [];
 
-        if (IS_MOBILE && document.body) {
-            document.body.classList.add('is-mobile');
+        if (IS_MOBILE) {
+            this.injectMobileCSS();
         }
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87b5dd);
-        this.scene.fog = new THREE.FogExp2(0x87b5dd, IS_MOBILE ? 0.0165 : 0.006);
+        this.scene.fog = new THREE.FogExp2(0x87b5dd, IS_MOBILE ? 0.0175 : 0.006);
 
         this.renderer = new THREE.WebGLRenderer({
             antialias: !IS_MOBILE,
+            alpha: false,
+            depth: true,
             stencil: false,
             precision: IS_MOBILE ? 'mediump' : 'highp',
             powerPreference: 'high-performance'
@@ -53,6 +67,31 @@ class Experience {
         this.clock = new THREE.Clock();
 
         this.init();
+    }
+
+    injectMobileCSS() {
+        if (document.body) document.body.classList.add('is-mobile');
+        const style = document.createElement('style');
+        style.textContent = `
+            body.is-mobile .menu-btn,
+            body.is-mobile .instructions,
+            body.is-mobile #chat,
+            body.is-mobile #voice-pill,
+            body.is-mobile #board-ui,
+            body.is-mobile .pause-hud-btn,
+            body.is-mobile #pause-menu {
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
+            body.is-mobile #chat,
+            body.is-mobile #voice-pill,
+            body.is-mobile .instructions,
+            body.is-mobile .pause-hud-btn,
+            body.is-mobile .pause-card {
+                background: rgba(14, 15, 18, 0.94) !important;
+            }
+        `;
+        document.head.appendChild(style);
     }
 
     showError(msg) {
@@ -126,10 +165,17 @@ class Experience {
         });
     }
 
+    getMaterialSignature(mat) {
+        const color = mat.color ? mat.color.getHexString() : 'ffffff';
+        const emissive = mat.emissive ? mat.emissive.getHexString() : '000000';
+        const mapId = mat.map ? mat.map.uuid : 'nomap';
+        const emMapId = mat.emissiveMap ? mat.emissiveMap.uuid : 'noem';
+        return `${mat.type}_${color}_${emissive}_${mapId}_${emMapId}_${mat.side}_${mat.vertexColors ? 1 : 0}`;
+    }
+
     optimizeSceneForMobile() {
         const materialCache = new Map();
         const lightsToRemove = [];
-        let keptPointLights = 0;
 
         const optimizeTexture = (tex) => {
             if (!tex) return;
@@ -157,7 +203,6 @@ class Experience {
 
         const convertMaterial = (mat) => {
             if (!mat) return mat;
-            if (materialCache.has(mat)) return materialCache.get(mat);
 
             if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
                 const fastMat = new THREE.MeshLambertMaterial({
@@ -184,7 +229,15 @@ class Experience {
                 optimizeTexture(fastMat.alphaMap);
                 cleanTransparency(fastMat);
 
-                materialCache.set(mat, fastMat);
+                const sig = this.getMaterialSignature(fastMat);
+                if (!fastMat.transparent && materialCache.has(sig)) {
+                    fastMat.dispose();
+                    mat.dispose();
+                    return materialCache.get(sig);
+                }
+                if (!fastMat.transparent) {
+                    materialCache.set(sig, fastMat);
+                }
                 mat.dispose();
                 return fastMat;
             }
@@ -192,7 +245,14 @@ class Experience {
             optimizeTexture(mat.map);
             optimizeTexture(mat.emissiveMap);
             cleanTransparency(mat);
-            materialCache.set(mat, mat);
+
+            const sig = this.getMaterialSignature(mat);
+            if (!mat.transparent && materialCache.has(sig)) {
+                return materialCache.get(sig);
+            }
+            if (!mat.transparent) {
+                materialCache.set(sig, mat);
+            }
             return mat;
         };
 
@@ -200,29 +260,22 @@ class Experience {
             obj.castShadow = false;
             obj.receiveShadow = false;
 
+            if (obj.isPositionalAudio && obj.panner) {
+                obj.panner.panningModel = 'equalpower';
+            }
+
             if (obj.isLight) {
-                if (obj.isAmbientLight || obj.isHemisphereLight) {
-                    obj.intensity *= 1.25;
-                } else if (obj.isDirectionalLight) {
+                if (obj.isAmbientLight || obj.isHemisphereLight || obj.isDirectionalLight) {
                     obj.castShadow = false;
-                } else if (obj.isSpotLight) {
+                } else {
                     lightsToRemove.push(obj);
-                } else if (obj.isPointLight) {
-                    if (keptPointLights < 2) {
-                        keptPointLights++;
-                    } else {
-                        lightsToRemove.push(obj);
-                    }
                 }
             }
 
             if (obj.isPoints && obj.geometry) {
                 const pos = obj.geometry.attributes.position;
-                if (pos && pos.count > 120) {
-                    obj.geometry.setDrawRange(0, 120);
-                }
-                if (obj.material && obj.material.size) {
-                    obj.material.size = Math.min(obj.material.size, 0.25);
+                if (pos && pos.count > 100) {
+                    obj.geometry.setDrawRange(0, 100);
                 }
             }
 
@@ -287,13 +340,15 @@ class Experience {
             if (Math.max(size.x, size.z) > 45) return;
 
             let zone = 'interior';
-            if (box.min.x <= 7.8 && box.max.x > 7.8) {
-                zone = 'shared';
+            if (center.z < -10.2) {
+                zone = 'backrooms';
+            } else if (box.min.x <= 7.8 && box.max.x > 7.8) {
+                zone = 'glassframe';
             } else if (center.x > 7.8) {
                 zone = 'exterior';
             }
 
-            const key = `${zone}_${mat.uuid}`;
+            const key = `${zone}_${this.getMaterialSignature(mat)}`;
             if (!buckets.has(key)) {
                 buckets.set(key, { mat, meshes: [] });
             }
@@ -454,15 +509,24 @@ class Experience {
             this.chat = new Chat(chosenName);
             this.voice = new VoiceChat(chosenName);
 
-            this.multiplayer = new MultiplayerManager({
-                scene: this.scene,
-                playerName: chosenName,
-                chat: this.chat,
-                initialState: { x: this.spawn.x, y: 0, z: this.spawn.z, yaw: 0, isSitting: false },
-                onCountChange: (n) => {
-                    if (this.onlineBadge) this.onlineBadge.textContent = `${n} online`;
-                }
-            });
+            const connectMultiplayer = () => {
+                if (this.multiplayer) return;
+                this.multiplayer = new MultiplayerManager({
+                    scene: this.scene,
+                    playerName: chosenName,
+                    chat: this.chat,
+                    initialState: { x: this.spawn.x, y: 0, z: this.spawn.z, yaw: 0, isSitting: false },
+                    onCountChange: (n) => {
+                        if (this.onlineBadge) this.onlineBadge.textContent = `${n} online`;
+                    }
+                });
+            };
+
+            if (IS_MOBILE) {
+                window.setTimeout(connectMultiplayer, 400);
+            } else {
+                connectMultiplayer();
+            }
 
             this.started = true;
             if (this.touch) this.touch.show();
@@ -474,20 +538,30 @@ class Experience {
             this.onWindowResize();
 
             this.player.unlockAudio();
-            try { this.tvPyramid.playAudio(); } catch (e) { console.warn(e); }
-            this.cameraManager.lock();
+            try {
+                this.tvPyramid.playAudio();
+                if (IS_MOBILE) {
+                    this.scene.traverse((obj) => {
+                        if (obj.isPositionalAudio && obj.panner) {
+                            obj.panner.panningModel = 'equalpower';
+                        }
+                    });
+                }
+            } catch (e) { console.warn(e); }
+
+            if (!IS_MOBILE) {
+                this.cameraManager.lock();
+            }
 
             if (this.prompt) this.prompt.classList.add('hidden');
 
-            this.clock.getDelta();
-
-            setTimeout(() => {
+            requestAnimationFrame(() => {
                 if (IS_MOBILE) {
                     this.warmupMobileGPU();
                 }
                 this.clock.getDelta();
                 this.render();
-            }, 120);
+            });
         };
 
         btnStart.addEventListener('click', startExperience);
@@ -549,7 +623,7 @@ class Experience {
         window.__loftFrozen = false;
         this.pauseMenu.hidden = true;
         this.clock.getDelta();
-        this.cameraManager.lock();
+        if (!IS_MOBILE) this.cameraManager.lock();
     }
 
     onWindowResize() {
@@ -578,7 +652,7 @@ class Experience {
                 this.fastFrames = 0;
                 if (this.slowFrames > 25 && this.mobilePixelRatio > 0.55) {
                     this.slowFrames = 0;
-                    this.mobilePixelRatio = Math.max(0.55, +(this.mobilePixelRatio - 0.08).toFixed(2));
+                    this.mobilePixelRatio = Math.max(0.55, +(this.mobilePixelRatio - 0.06).toFixed(2));
                     this.renderer.setPixelRatio(this.mobilePixelRatio);
                 }
             } else if (rawDelta < 0.022) {
@@ -586,7 +660,7 @@ class Experience {
                 this.slowFrames = Math.max(0, this.slowFrames - 1);
                 if (this.fastFrames > 180 && this.mobilePixelRatio < 0.72) {
                     this.fastFrames = 0;
-                    this.mobilePixelRatio = Math.min(0.72, +(this.mobilePixelRatio + 0.06).toFixed(2));
+                    this.mobilePixelRatio = Math.min(0.72, +(this.mobilePixelRatio + 0.04).toFixed(2));
                     this.renderer.setPixelRatio(this.mobilePixelRatio);
                 }
             }
@@ -599,7 +673,7 @@ class Experience {
             if (IS_MOBILE && this.exteriorSmallProps.length > 0 && this.frameCount % 6 === 0) {
                 const px = this.player.group.position.x;
                 const pz = this.player.group.position.z;
-                const maxDistSq = 46 * 46;
+                const maxDistSq = 44 * 44;
                 for (let i = 0; i < this.exteriorSmallProps.length; i++) {
                     const item = this.exteriorSmallProps[i];
                     const dx = item.x - px;
@@ -613,7 +687,6 @@ class Experience {
                 this.projector.update(this.player.group.position);
                 this.meetingRoom.update(this.player.group.position);
             } else {
-                // Intercala as telas dinâmicas em frames diferentes para evitar pico ao cruzar a porta
                 const slot = this.frameCount % 4;
                 if (slot === 0) this.tvPyramid.update(this.player.group.position);
                 else if (slot === 1) this.projector.update(this.player.group.position);

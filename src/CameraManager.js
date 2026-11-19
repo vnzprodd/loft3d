@@ -9,13 +9,13 @@ export class CameraManager {
         this.scene = scene;
         this.player = player;
         this.dom = domElement;
-        const isMobile = isMobileDevice();
+        this.isMobile = isMobileDevice();
 
         this.camera = new THREE.PerspectiveCamera(
             75,
             window.innerWidth / window.innerHeight,
             0.1,
-            isMobile ? 85 : 600
+            this.isMobile ? 80 : 600
         );
         this.scene.add(this.camera);
 
@@ -34,9 +34,11 @@ export class CameraManager {
         };
         document.addEventListener('mousemove', this.onMouseMove);
 
-        this.dom.addEventListener('click', () => {
-            if (!window.__loftFrozen && !this.isTyping()) this.lock();
-        });
+        if (!this.isMobile) {
+            this.dom.addEventListener('click', () => {
+                if (!window.__loftFrozen && !this.isTyping()) this.lock();
+            });
+        }
 
         window.addEventListener('keydown', (e) => {
             if (this.isTyping() || window.__loftFrozen) return;
@@ -61,6 +63,7 @@ export class CameraManager {
     }
 
     lock() {
+        if (this.isMobile) return;
         try {
             const r = this.dom.requestPointerLock();
             if (r && r.catch) r.catch(() => {});

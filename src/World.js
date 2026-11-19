@@ -110,7 +110,8 @@ export class World {
     constructor(scene) {
         this.scene = scene;
         this.isMobile = isMobileDevice();
-        this.colliders = []; // {minX,maxX,minZ,maxZ,minY,maxY}
+        this.colliders = [];
+        this.mobileMatCache = new Map();
 
         this.matWood = this.mat({ map: makeWoodTexture(), roughness: 0.9 });
         this.matBlack = this.mat({ color: 0x141414, roughness: 0.6, metalness: 0.5 });
@@ -124,7 +125,13 @@ export class World {
     mat(opts) {
         if (this.isMobile) {
             const { roughness, metalness, ...rest } = opts;
-            return new THREE.MeshLambertMaterial(rest);
+            const key = `${rest.color ?? 'none'}_${rest.map ? rest.map.uuid : 'nomap'}_${rest.side ?? THREE.FrontSide}`;
+            if (!rest.transparent && this.mobileMatCache.has(key)) {
+                return this.mobileMatCache.get(key);
+            }
+            const m = new THREE.MeshLambertMaterial(rest);
+            if (!rest.transparent) this.mobileMatCache.set(key, m);
+            return m;
         }
         return new THREE.MeshStandardMaterial(opts);
     }
@@ -232,7 +239,7 @@ export class World {
 
         const glassMat = this.isMobile
             ? new THREE.MeshBasicMaterial({
-                color: 0xbcccd8, transparent: true, opacity: 0.24,
+                color: 0xbcccd8, transparent: true, opacity: 0.2,
                 side: THREE.DoubleSide, depthWrite: false
             })
             : new THREE.MeshStandardMaterial({
@@ -255,7 +262,7 @@ export class World {
 
     createBeach() {
         const sand = new THREE.Mesh(
-            new THREE.PlaneGeometry(26, 90),
+            new THREE.PlaneGeometry(26, this.isMobile ? 64 : 90),
             this.mat({ color: 0xe2cf9f, roughness: 1 })
         );
         sand.rotation.x = -Math.PI / 2;
@@ -263,26 +270,27 @@ export class World {
         sand.receiveShadow = !this.isMobile;
         this.scene.add(sand);
 
+        const seaSize = this.isMobile ? 140 : 400;
         const sea = new THREE.Mesh(
-            new THREE.PlaneGeometry(400, 400),
+            new THREE.PlaneGeometry(seaSize, seaSize),
             this.isMobile
                 ? new THREE.MeshLambertMaterial({ color: 0x2f7fb5, transparent: false })
                 : new THREE.MeshStandardMaterial({ color: 0x2f7fb5, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.9 })
         );
         sea.rotation.x = -Math.PI / 2;
-        sea.position.set(34 + 200, 0.0, 0);
+        sea.position.set(34 + seaSize / 2, 0.0, 0);
         this.scene.add(sea);
 
         const trunkMat = this.mat({ color: 0x6b4a2b, roughness: 1 });
         const leafMat = this.mat({ color: 0x2f6b2f, roughness: 1 });
         [[17, -12], [19, 9], [23, -4], [26, 14], [16, 17]].forEach(([x, z]) => {
-            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 4, 6), trunkMat);
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 4, this.isMobile ? 5 : 6), trunkMat);
             trunk.position.set(x, 2, z);
             trunk.castShadow = !this.isMobile;
             this.scene.add(trunk);
             for (let i = 0; i < 6; i++) {
                 const a = (i / 6) * Math.PI * 2;
-                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.18, 2, 5), leafMat);
+                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.18, 2, this.isMobile ? 4 : 5), leafMat);
                 leaf.position.set(x + Math.cos(a) * 0.9, 4.1, z + Math.sin(a) * 0.9);
                 leaf.rotation.set(Math.sin(a) * 1.2, 0, -Math.cos(a) * 1.2);
                 this.scene.add(leaf);
@@ -361,11 +369,7 @@ export class World {
         const rail = this.box(13.5, 0.08, 0.12, this.matBlack, 0, baseY + h - 0.22, -17.5, 0, false);
         rail.castShadow = false;
 
-        if (this.isMobile) {
-            const galleryLight = new THREE.PointLight(0xf0f2ff, 18, 22, 1.5);
-            galleryLight.position.set(0, baseY + h - 0.4, -17.5);
-            this.scene.add(galleryLight);
-        } else {
+        if (!this.isMobile) {
             [-5.5, 0, 5.5].forEach(x => {
                 const spot = new THREE.SpotLight(0xf0f2ff, 22, 9, Math.PI / 7, 0.55, 1.4);
                 spot.position.set(x, baseY + h - 0.35, -17.5);
@@ -414,7 +418,7 @@ export class World {
                 const t = (i + 0.5) / postCount;
                 const z = startZ - t * run;
                 const y = t * GALLERY_FLOOR_Y + 0.48;
-                const post = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.9, 6), this.matMetal);
+                const post = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.9, this.isMobile ? 5 : 6), this.matMetal);
                 post.position.set(x, y, z);
                 this.scene.add(post);
             }
@@ -427,7 +431,7 @@ export class World {
 
         const glassRailMat = this.isMobile
             ? new THREE.MeshBasicMaterial({
-                color: 0xbcccd8, transparent: true, opacity: 0.2,
+                color: 0xbcccd8, transparent: true, opacity: 0.18,
                 side: THREE.DoubleSide, depthWrite: false
             })
             : new THREE.MeshStandardMaterial({
@@ -487,19 +491,18 @@ export class World {
         const glass = new THREE.Mesh(
             new THREE.PlaneGeometry(2.8, 1.8),
             this.isMobile
-                ? new THREE.MeshBasicMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false })
+                ? new THREE.MeshBasicMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.26, side: THREE.DoubleSide, depthWrite: false })
                 : new THREE.MeshStandardMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.38, side: THREE.DoubleSide })
         );
         glass.position.set(0, 3, 10);
         glass.rotation.y = Math.PI;
         this.scene.add(glass);
 
-        // No celular usa plano simples sem iluminação PBR para eliminar overdraw na travessia da porta
         const glassMat = this.isMobile
             ? new THREE.MeshBasicMaterial({
                 color: 0xc8d7e4,
                 transparent: true,
-                opacity: 0.2,
+                opacity: 0.16,
                 side: THREE.DoubleSide,
                 depthWrite: false
             })
@@ -520,11 +523,19 @@ export class World {
                 this.scene.add(panel);
             }
         };
-        addGlassPanel(-5.7, 8.6);
-        addGlassPanel(5.7, 8.6);
 
-        addGlassPanel(-2.25, 1.45, 7.94);
-        addGlassPanel(2.25, 1.45, 7.94);
+        if (this.isMobile) {
+            // Painéis sem sobreposição para eliminar overdraw duplo na porta de vidro
+            addGlassPanel(-6.5, 7.0, 8);
+            addGlassPanel(6.5, 7.0, 8);
+            addGlassPanel(-2.2, 1.6, 7.94);
+            addGlassPanel(2.2, 1.6, 7.94);
+        } else {
+            addGlassPanel(-5.7, 8.6);
+            addGlassPanel(5.7, 8.6);
+            addGlassPanel(-2.25, 1.45, 7.94);
+            addGlassPanel(2.25, 1.45, 7.94);
+        }
 
         this.box(0.12, 0.12, 20, frameMat, 8, 5.62, 0);
         this.box(0.12, 0.12, 20, frameMat, 8, 0.08, 0);
@@ -595,7 +606,7 @@ export class World {
         this.scene.add(bedG);
         this.addCollider(-6.4, -7, 2.2, 2.9, railBase, railBase + 1.0);
 
-        const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.22, 8), this.matDarkGray);
+        const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.22, this.isMobile ? 6 : 8), this.matDarkGray);
         pot.position.set(-1.3, 2.85 + levelOffset, -4.1);
         this.scene.add(pot);
         const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 6), this.mat({ color: 0x2f4f2f, roughness: 1 }));
@@ -636,9 +647,10 @@ export class World {
         faucet.position.set(-4.5, 1.1, -7.05);
         this.scene.add(faucet);
 
+        const stoolSeatMat = this.mat({ color: 0x5a3a28, roughness: 0.8 });
         for (let i = 0; i < 3; i++) {
             const g = new THREE.Group();
-            const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 10), this.mat({ color: 0x5a3a28, roughness: 0.8 }));
+            const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.05, this.isMobile ? 8 : 10), stoolSeatMat);
             seat.position.y = 0.62;
             g.add(seat);
             for (let l = 0; l < 3; l++) {
@@ -652,13 +664,14 @@ export class World {
             this.scene.add(g);
         }
 
+        const plantLeafMat = this.mat({ color: 0x2e4d2e, roughness: 1 });
         [[-7.3, -3.5], [-2.2, -9]].forEach(([x, z]) => {
-            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 0.4, 8), this.matDarkGray);
+            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 0.4, this.isMobile ? 6 : 8), this.matDarkGray);
             pot.position.set(x, 0.2, z);
             pot.castShadow = !this.isMobile;
             this.scene.add(pot);
             for (let l = 0; l < 6; l++) {
-                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.9, 5), this.mat({ color: 0x2e4d2e, roughness: 1 }));
+                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.9, this.isMobile ? 4 : 5), plantLeafMat);
                 leaf.position.set(x + Math.random() * 0.25 - 0.12, 0.75, z + Math.random() * 0.25 - 0.12);
                 leaf.rotation.z = Math.random() * 0.6 - 0.3;
                 leaf.rotation.x = Math.random() * 0.6 - 0.3;
@@ -675,12 +688,13 @@ export class World {
         this.scene.add(rug);
 
         const sofaMat = this.mat({ color: 0x181818, roughness: 1 });
+        const cushionMat = this.mat({ color: 0x2c2c2c, roughness: 1 });
         this.box(1.2, 0.4, 2.8, sofaMat, 5.3, 0.28, 4);
         this.box(0.3, 0.6, 2.8, sofaMat, 5.95, 0.55, 4);
         this.box(2.4, 0.4, 1.1, sofaMat, 4.5, 0.28, 2.85);
         this.box(2.4, 0.6, 0.3, sofaMat, 4.5, 0.55, 2.35);
         for (let i = 0; i < 3; i++) {
-            this.box(0.85, 0.16, 0.9, this.mat({ color: 0x2c2c2c, roughness: 1 }), 5.3, 0.55, 3 + i * 0.95);
+            this.box(0.85, 0.16, 0.9, cushionMat, 5.3, 0.55, 3 + i * 0.95);
         }
         this.addCollider(5.5, 4, 1.6, 3);
         this.addCollider(4.5, 2.85, 2.6, 1.3);
@@ -692,19 +706,27 @@ export class World {
             leg.position.set(x, 0.18, z);
             this.scene.add(leg);
         });
-        const vase = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.16, 8), this.matDarkGray);
+        const vase = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.16, 6), this.matDarkGray);
         vase.position.set(3.2, 0.47, 4.6);
         this.scene.add(vase);
         this.addCollider(3.2, 4.6, 1.2, 0.8);
     }
 
     createLights() {
-        this.scene.add(new THREE.AmbientLight(0x30343c, this.isMobile ? 1.55 : 1.2));
+        if (this.isMobile) {
+            // Iluminação global leve sem PointLights (mantém o interior e a praia claros sem custo de shader)
+            const hemi = new THREE.HemisphereLight(0xdcebff, 0x6b6257, 1.55);
+            this.scene.add(hemi);
 
-        const sun = new THREE.DirectionalLight(0xfff2e0, 2.4);
-        sun.position.set(14, 8, 3);
-        sun.target.position.set(-3, 0, 0);
-        if (!this.isMobile) {
+            const sun = new THREE.DirectionalLight(0xfff2e0, 1.25);
+            sun.position.set(14, 10, 4);
+            this.scene.add(sun);
+        } else {
+            this.scene.add(new THREE.AmbientLight(0x30343c, 1.2));
+
+            const sun = new THREE.DirectionalLight(0xfff2e0, 2.4);
+            sun.position.set(14, 8, 3);
+            sun.target.position.set(-3, 0, 0);
             sun.castShadow = true;
             sun.shadow.mapSize.set(2048, 2048);
             sun.shadow.bias = -0.0005;
@@ -714,8 +736,8 @@ export class World {
             sun.shadow.camera.right = 15;
             sun.shadow.camera.top = 15;
             sun.shadow.camera.bottom = -15;
+            this.scene.add(sun, sun.target);
         }
-        this.scene.add(sun, sun.target);
 
         [-5.6, -4.5, -3.4].forEach(x => {
             const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffc98a }));
@@ -735,14 +757,10 @@ export class World {
             }
         });
 
-        if (this.isMobile) {
-            const kitchenPt = new THREE.PointLight(0xffb46a, 14, 10, 1.8);
-            kitchenPt.position.set(-4.5, 2.6, -6.8);
-            this.scene.add(kitchenPt);
+        if (!this.isMobile) {
+            const fill = new THREE.PointLight(0x8fa3bf, 14, 18, 2);
+            fill.position.set(7, 4, 2);
+            this.scene.add(fill);
         }
-
-        const fill = new THREE.PointLight(0x8fa3bf, 14, 18, 2);
-        fill.position.set(7, 4, 2);
-        this.scene.add(fill);
     }
 }

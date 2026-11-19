@@ -24,6 +24,14 @@ export class MeetingRoom {
         this.buildFurniture();
         this.buildLights();
 
+        if (this.isMobile) {
+            const boardCanvas = document.getElementById('board-canvas');
+            if (boardCanvas && boardCanvas.width > 1024) {
+                boardCanvas.width = 1024;
+                boardCanvas.height = 512;
+            }
+        }
+
         this.whiteboard = new Whiteboard(scene, {
             position: new THREE.Vector3((this.x0 + this.x1) / 2, 2.0, this.z0 + 0.22),
             width: 6,
@@ -141,6 +149,7 @@ export class MeetingRoom {
         this.world.addCollider(cx, tableZ, 6.0, 2.0, 0, 0.85);
 
         const matSeat = this.mat({ color: 0x151515, roughness: 0.85 });
+        const seg = this.isMobile ? 5 : 6;
         const chairAt = (x, z, ry) => {
             const g = new THREE.Group();
 
@@ -148,9 +157,9 @@ export class MeetingRoom {
             seat.position.y = 0.46;
             const back = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.52, 0.07), matSeat);
             back.position.set(0, 0.74, -0.23);
-            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.36, 6), legMat);
+            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.36, seg), legMat);
             stem.position.y = 0.28;
-            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 6), legMat);
+            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, seg), legMat);
             hub.position.y = 0.1;
             g.add(seat, back, stem, hub);
 
@@ -159,7 +168,7 @@ export class MeetingRoom {
                 const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.035, 0.045), legMat);
                 spoke.position.set(Math.cos(a) * 0.16, 0.08, Math.sin(a) * 0.16);
                 spoke.rotation.y = -a;
-                const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 6), matSeat);
+                const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, seg), matSeat);
                 wheel.position.set(Math.cos(a) * 0.3, 0.045, Math.sin(a) * 0.3);
                 g.add(spoke, wheel);
             }
@@ -201,11 +210,11 @@ export class MeetingRoom {
         const potMat = this.mat({ color: 0x7d7a74, roughness: 0.9 });
         const leafMat = this.mat({ color: 0x35672f, roughness: 1 });
         [[this.x0 + 0.7, this.z0 + 0.9], [this.x1 - 0.7, this.z0 + 0.9]].forEach(([x, z]) => {
-            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.42, 8), potMat);
+            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.42, this.isMobile ? 6 : 8), potMat);
             pot.position.set(x, 0.21, z);
             this.scene.add(pot);
             for (let i = 0; i < 7; i++) {
-                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.85, 5), leafMat);
+                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.85, this.isMobile ? 4 : 5), leafMat);
                 const a = (i / 7) * Math.PI * 2;
                 leaf.position.set(x + Math.cos(a) * 0.18, 0.85, z + Math.sin(a) * 0.18);
                 leaf.rotation.set(Math.sin(a) * 0.35, 0, -Math.cos(a) * 0.35);
@@ -220,21 +229,21 @@ export class MeetingRoom {
 
         [-1.5, 1.5].forEach(dx => {
             const shade = new THREE.Mesh(
-                new THREE.ConeGeometry(0.22, 0.24, 10, 1, true),
+                new THREE.ConeGeometry(0.22, 0.24, this.isMobile ? 7 : 10, 1, true),
                 this.mat({ color: 0x1a1a1a, roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide })
             );
             shade.position.set(cx + dx, 2.85, -17.5);
             this.scene.add(shade);
 
             const bulb = new THREE.Mesh(
-                new THREE.SphereGeometry(0.055, 8, 8),
+                new THREE.SphereGeometry(0.055, 6, 6),
                 new THREE.MeshBasicMaterial({ color: 0xffd6a0 })
             );
             bulb.position.set(cx + dx, 2.78, -17.5);
             this.scene.add(bulb);
 
             const wire = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.008, 0.008, this.ceilH - 2.95, 6),
+                new THREE.CylinderGeometry(0.008, 0.008, this.ceilH - 2.95, 5),
                 this.mat({ color: 0x111111 })
             );
             wire.position.set(cx + dx, (this.ceilH + 2.95) / 2, -17.5);
@@ -287,6 +296,9 @@ export class MeetingRoom {
     }
 
     update(playerPos) {
+        if (this.isMobile && this.transmissionScreen) {
+            this.transmissionScreen.visible = playerPos.z < -8.5 && playerPos.x > -1;
+        }
         this.whiteboard.update(playerPos);
     }
 }
