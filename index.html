@@ -30,16 +30,33 @@
         </div>
     </div>
 
+    <!-- Menu de Pause -->
+    <div id="pause-menu" hidden>
+        <div class="pause-card">
+            <h2>Experiência Pausada</h2>
+            <p id="pause-room-label" class="pause-sub">Sala: loft-principal</p>
+            <div class="menu-buttons">
+                <button id="btn-resume" class="menu-btn primary" type="button">Continuar</button>
+                <button id="btn-pause-invite" class="menu-btn" type="button">Copiar link da sala</button>
+                <button id="btn-exit-menu" class="menu-btn danger" type="button">Sair para o menu</button>
+            </div>
+        </div>
+    </div>
+
     <div id="ui">
         <div class="instructions">
-            WASD mover &nbsp;·&nbsp; Mouse olhar &nbsp;·&nbsp; T chat &nbsp;·&nbsp; V falar &nbsp;·&nbsp; Q quadro
+            WASD mover &nbsp;·&nbsp; Mouse olhar &nbsp;·&nbsp; T chat &nbsp;·&nbsp; V falar &nbsp;·&nbsp; Q quadro &nbsp;·&nbsp; ESC pausar
         </div>
+        <button id="btn-pause" class="pause-hud-btn" type="button" aria-label="Pausar experiência">
+            ❚❚ Pausar
+        </button>
     </div>
 
     <!-- Chat de texto -->
     <aside id="chat" aria-label="Chat de texto da sala">
         <header id="chat-head">
             <span class="chat-title">Chat da sala</span>
+            <span id="chat-online" class="chat-online">1 online</span>
             <span id="chat-badge" hidden></span>
             <button id="chat-toggle" type="button" aria-label="Recolher o chat">–</button>
         </header>

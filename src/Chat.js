@@ -1,6 +1,3 @@
-// Chat de texto da sala, no canto superior esquerdo.
-// Usa BroadcastChannel: abas/janelas do mesmo navegador conversam de verdade
-// entre si. Para conversar pela internet, troque o canal por um WebSocket.
 const CHANNEL = 'loft-industrial-chat';
 const MAX_MESSAGES = 200;
 
@@ -21,27 +18,31 @@ export class Chat {
         this.badge = document.getElementById('chat-badge');
 
         this.channel = null;
+        this.multiplayer = null;
         this.unread = 0;
         this.collapsed = false;
 
+        // Limpa mensagens antigas se o usuário saiu e entrou novamente
+        this.list.innerHTML = '';
+
         try {
             this.channel = new BroadcastChannel(CHANNEL);
-            this.channel.onmessage = (e) => this.receive(e.data);
+            this.channel.onmessage = (e) => this.receiveLocal(e.data);
         } catch (err) {
             console.warn('Conversa entre abas indisponível neste navegador:', err);
         }
 
-        this.form.addEventListener('submit', (e) => {
+        this.onSubmit = (e) => {
             e.preventDefault();
             this.send(this.input.value);
             this.input.value = '';
-        });
+        };
+        this.form.onsubmit = this.onSubmit;
 
-        this.toggleBtn.addEventListener('click', () => this.setCollapsed(!this.collapsed));
+        this.toggleBtn.onclick = () => this.setCollapsed(!this.collapsed);
 
-        // T abre o chat; Esc fecha
-        window.addEventListener('keydown', (e) => {
-            if (e.repeat) return;
+        this.onKeyDown = (e) => {
+            if (e.repeat || window.__loftFrozen) return;
             const el = document.activeElement;
             const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 
@@ -54,15 +55,14 @@ export class Chat {
                 e.preventDefault();
                 this.focus();
             }
-        });
+        };
+        window.addEventListener('keydown', this.onKeyDown);
 
         this.system(`Você entrou como ${this.name}.`);
-        if (!this.channel) {
-            this.system('Este navegador não abre o chat entre abas — as mensagens ficam só nesta janela.');
-        }
+    }
 
-        // avisa as outras abas que chegamos
-        this.post({ type: 'join', name: this.name });
+    bindMultiplayer(multiplayer) {
+        this.multiplayer = multiplayer;
     }
 
     static pickName() {
@@ -77,7 +77,7 @@ export class Chat {
         }
     }
 
-    post(payload) {
+    postLocal(payload) {
         if (!this.channel) return;
         try { this.channel.postMessage(payload); } catch (err) { /* canal fechado */ }
     }
@@ -85,18 +85,29 @@ export class Chat {
     send(text) {
         const body = (text || '').trim();
         if (!body) return;
-        this.render({ name: this.name, text: body, time: Date.now(), mine: true });
-        this.post({ type: 'msg', name: this.name, text: body, time: Date.now() });
+        const now = Date.now();
+        this.render({ name: this.name, text: body, time: now, mine: true });
+
+        if (this.multiplayer) {
+            this.multiplayer.sendChat(body);
+        } else {
+            this.postLocal({ type: 'msg', name: this.name, text: body, time: now });
+        }
     }
 
-    receive(data) {
-        if (!data) return;
+    receiveLocal(data) {
+        if (!data || this.multiplayer) return;
         if (data.type === 'msg') {
-            this.render({ name: data.name, text: data.text, time: data.time, mine: false });
-            if (this.collapsed || document.activeElement !== this.input) this.bumpUnread();
+            this.receiveRemote(data);
         } else if (data.type === 'join') {
             this.system(`${data.name} entrou na sala.`);
         }
+    }
+
+    receiveRemote(data) {
+        if (!data || !data.text) return;
+        this.render({ name: data.name, text: data.text, time: data.time || Date.now(), mine: false });
+        if (this.collapsed || document.activeElement !== this.input) this.bumpUnread();
     }
 
     render({ name, text, time, mine }) {
@@ -118,7 +129,7 @@ export class Chat {
 
         const body = document.createElement('div');
         body.className = 'msg-body';
-        body.textContent = text;   // textContent evita injetar HTML
+        body.textContent = text;
 
         row.append(head, body);
         this.list.appendChild(row);
@@ -160,5 +171,12 @@ export class Chat {
         this.setCollapsed(false);
         this.input.focus();
         if (document.pointerLockElement) document.exitPointerLock();
+    }
+
+    destroy() {
+        window.removeEventListener('keydown', this.onKeyDown);
+        if (this.channel) {
+            try { this.channel.close(); } catch (e) { /* ignora */ }
+        }
     }
 }
