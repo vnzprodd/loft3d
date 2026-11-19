@@ -12,7 +12,9 @@ import { MultiplayerManager } from './Multiplayer.js';
 import { TouchControls } from './TouchControls.js';
 
 export const IS_MOBILE = typeof window !== 'undefined' &&
-    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+    (window.matchMedia('(pointer: coarse)').matches ||
+        /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)));
 
 // No Safari/Android, evita upload de VideoTexture (texImage2D) 60x por segundo
 if (IS_MOBILE && THREE.VideoTexture && !THREE.VideoTexture.prototype.__mobileThrottled) {
@@ -33,9 +35,7 @@ class Experience {
         this.started = false;
         this.paused = false;
         this.frameCount = 0;
-        this.mobilePixelRatio = 0.68;
-        this.slowFrames = 0;
-        this.fastFrames = 0;
+        this.mobilePixelRatio = 0.55;
         this.exteriorSmallProps = [];
 
         if (IS_MOBILE) {
@@ -646,39 +646,25 @@ class Experience {
         const deltaTime = Math.min(rawDelta, 0.1);
         this.frameCount++;
 
-        if (IS_MOBILE && !this.paused) {
-            if (rawDelta > 0.036) {
-                this.slowFrames++;
-                this.fastFrames = 0;
-                if (this.slowFrames > 25 && this.mobilePixelRatio > 0.55) {
-                    this.slowFrames = 0;
-                    this.mobilePixelRatio = Math.max(0.55, +(this.mobilePixelRatio - 0.06).toFixed(2));
-                    this.renderer.setPixelRatio(this.mobilePixelRatio);
-                }
-            } else if (rawDelta < 0.022) {
-                this.fastFrames++;
-                this.slowFrames = Math.max(0, this.slowFrames - 1);
-                if (this.fastFrames > 180 && this.mobilePixelRatio < 0.72) {
-                    this.fastFrames = 0;
-                    this.mobilePixelRatio = Math.min(0.72, +(this.mobilePixelRatio + 0.04).toFixed(2));
-                    this.renderer.setPixelRatio(this.mobilePixelRatio);
-                }
-            }
-        }
-
         if (!this.paused) {
             this.player.update(deltaTime);
             this.cameraManager.update(deltaTime);
 
-            if (IS_MOBILE && this.exteriorSmallProps.length > 0 && this.frameCount % 6 === 0) {
-                const px = this.player.group.position.x;
-                const pz = this.player.group.position.z;
-                const maxDistSq = 44 * 44;
-                for (let i = 0; i < this.exteriorSmallProps.length; i++) {
-                    const item = this.exteriorSmallProps[i];
-                    const dx = item.x - px;
-                    const dz = item.z - pz;
-                    item.mesh.visible = (dx * dx + dz * dz) <= maxDistSq;
+            if (IS_MOBILE) {
+                if (this.world.updateMobileGlass) {
+                    this.world.updateMobileGlass(this.player.group.position.x);
+                }
+
+                if (this.exteriorSmallProps.length > 0 && this.frameCount % 6 === 0) {
+                    const px = this.player.group.position.x;
+                    const pz = this.player.group.position.z;
+                    const maxDistSq = 40 * 40;
+                    for (let i = 0; i < this.exteriorSmallProps.length; i++) {
+                        const item = this.exteriorSmallProps[i];
+                        const dx = item.x - px;
+                        const dz = item.z - pz;
+                        item.mesh.visible = (dx * dx + dz * dz) <= maxDistSq;
+                    }
                 }
             }
 

@@ -7,7 +7,9 @@ const STAIR_STEPS = 20;
 
 const isMobileDevice = () =>
     typeof window !== 'undefined' &&
-    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+    (window.matchMedia('(pointer: coarse)').matches ||
+        /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)));
 
 const textureCache = new Map();
 
@@ -112,6 +114,8 @@ export class World {
         this.isMobile = isMobileDevice();
         this.colliders = [];
         this.mobileMatCache = new Map();
+        this.mobileGlassPanels = [];
+        this.mobileWallGlassMat = null;
 
         this.matWood = this.mat({ map: makeWoodTexture(), roughness: 0.9 });
         this.matBlack = this.mat({ color: 0x141414, roughness: 0.6, metalness: 0.5 });
@@ -239,8 +243,8 @@ export class World {
 
         const glassMat = this.isMobile
             ? new THREE.MeshBasicMaterial({
-                color: 0xbcccd8, transparent: true, opacity: 0.2,
-                side: THREE.DoubleSide, depthWrite: false
+                color: 0xbcccd8, transparent: true, opacity: 0.18,
+                side: THREE.FrontSide, depthWrite: false, fog: false
             })
             : new THREE.MeshStandardMaterial({
                 color: 0xbcccd8, transparent: true, opacity: 0.28, roughness: 0.15
@@ -251,7 +255,10 @@ export class World {
                 ? new THREE.Mesh(new THREE.PlaneGeometry(len, 1), glassMat)
                 : new THREE.Mesh(new THREE.BoxGeometry(0.04, 1, len), glassMat);
             g.position.set(13, 0.5, z);
-            if (this.isMobile) g.rotation.y = Math.PI / 2;
+            if (this.isMobile) {
+                g.rotation.y = -Math.PI / 2;
+                this.mobileGlassPanels.push({ mesh: g, x: 13, baseRotY: -Math.PI / 2, isMainWall: false });
+            }
             this.scene.add(g);
 
             const top = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, len), this.matMetal);
@@ -431,8 +438,8 @@ export class World {
 
         const glassRailMat = this.isMobile
             ? new THREE.MeshBasicMaterial({
-                color: 0xbcccd8, transparent: true, opacity: 0.18,
-                side: THREE.DoubleSide, depthWrite: false
+                color: 0xbcccd8, transparent: true, opacity: 0.16,
+                side: THREE.FrontSide, depthWrite: false, fog: false
             })
             : new THREE.MeshStandardMaterial({
                 color: 0xbcccd8, transparent: true, opacity: 0.24, roughness: 0.1
@@ -491,7 +498,7 @@ export class World {
         const glass = new THREE.Mesh(
             new THREE.PlaneGeometry(2.8, 1.8),
             this.isMobile
-                ? new THREE.MeshBasicMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.26, side: THREE.DoubleSide, depthWrite: false })
+                ? new THREE.MeshBasicMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.22, side: THREE.FrontSide, depthWrite: false, fog: false })
                 : new THREE.MeshStandardMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.38, side: THREE.DoubleSide })
         );
         glass.position.set(0, 3, 10);
@@ -502,21 +509,26 @@ export class World {
             ? new THREE.MeshBasicMaterial({
                 color: 0xc8d7e4,
                 transparent: true,
-                opacity: 0.16,
-                side: THREE.DoubleSide,
-                depthWrite: false
+                opacity: 0.14,
+                side: THREE.FrontSide,
+                depthWrite: false,
+                fog: false
             })
             : new THREE.MeshStandardMaterial({
                 color: 0xc8d7e4, metalness: 0.1, roughness: 0.08,
                 transparent: true, opacity: 0.24, side: THREE.DoubleSide
             });
+        if (this.isMobile) {
+            this.mobileWallGlassMat = glassMat;
+        }
         const frameMat = this.matBlack;
         const addGlassPanel = (z, length, x = 8) => {
             if (this.isMobile) {
                 const panel = new THREE.Mesh(new THREE.PlaneGeometry(length, 5.55), glassMat);
                 panel.position.set(x, 2.8, z);
-                panel.rotation.y = Math.PI / 2;
+                panel.rotation.y = -Math.PI / 2;
                 this.scene.add(panel);
+                this.mobileGlassPanels.push({ mesh: panel, x, baseRotY: -Math.PI / 2, isMainWall: true });
             } else {
                 const panel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 5.55, length), glassMat);
                 panel.position.set(x, 2.8, z);
@@ -525,7 +537,6 @@ export class World {
         };
 
         if (this.isMobile) {
-            // Painéis sem sobreposição para eliminar overdraw duplo na porta de vidro
             addGlassPanel(-6.5, 7.0, 8);
             addGlassPanel(6.5, 7.0, 8);
             addGlassPanel(-2.2, 1.6, 7.94);
@@ -544,6 +555,32 @@ export class World {
 
         this.box(0.18, 0.045, 3.4, this.matMetal, 8, 5.72, 0);
         this.box(0.18, 0.045, 3.4, this.matMetal, 8, 5.66, 0);
+    }
+
+    updateMobileGlass(playerX) {
+        if (!this.isMobile || this.mobileGlassPanels.length === 0) return;
+
+        let minWallDist = Infinity;
+        for (let i = 0; i < this.mobileGlassPanels.length; i++) {
+            const item = this.mobileGlassPanels[i];
+            const dist = Math.abs(playerX - item.x);
+            if (item.isMainWall && dist < minWallDist) {
+                minWallDist = dist;
+            }
+
+            if (dist < 0.85) {
+                item.mesh.visible = false;
+            } else {
+                item.mesh.visible = true;
+                item.mesh.rotation.y = playerX < item.x ? item.baseRotY : -item.baseRotY;
+            }
+        }
+
+        if (this.mobileWallGlassMat && minWallDist >= 0.85) {
+            this.mobileWallGlassMat.opacity = minWallDist < 2.0
+                ? 0.14 * ((minWallDist - 0.85) / 1.15)
+                : 0.14;
+        }
     }
 
     createMezzanine() {
@@ -714,7 +751,6 @@ export class World {
 
     createLights() {
         if (this.isMobile) {
-            // Iluminação global leve sem PointLights (mantém o interior e a praia claros sem custo de shader)
             const hemi = new THREE.HemisphereLight(0xdcebff, 0x6b6257, 1.55);
             this.scene.add(hemi);
 
