@@ -65,7 +65,14 @@ class Experience {
 
         this.player = new Player(this.scene);
         this.player.world = this.world;
-        this.player.group.position.set(0, 0, 6);
+        // Cada jogador nasce num ponto livre diferente, para não nascer em cima de outro
+        const spawnXs = [-4, -2.5, -1, 0.5, 2];
+        const spawnZs = [5.5, 7, 8.5];
+        this.spawn = {
+            x: spawnXs[Math.floor(Math.random() * spawnXs.length)],
+            z: spawnZs[Math.floor(Math.random() * spawnZs.length)]
+        };
+        this.player.group.position.set(this.spawn.x, 0, this.spawn.z);
 
         this.cameraManager = new CameraManager(this.scene, this.player, this.renderer.domElement);
         this.player.camera = this.cameraManager.camera;
@@ -90,8 +97,8 @@ class Experience {
     // Copia o link da sala e mostra um aviso curto no próprio botão
     async copyInviteLink(button, originalLabel) {
         const inviteUrl = new URL(window.location.href);
+        inviteUrl.search = '';
         inviteUrl.hash = '';
-        // mantém ?sala=... se existir, para o amigo cair na mesma sala
         const link = inviteUrl.toString();
 
         const fallbackCopy = (value) => {
@@ -163,6 +170,7 @@ class Experience {
                 scene: this.scene,
                 playerName: chosenName,
                 chat: this.chat,
+                initialState: { x: this.spawn.x, y: 0, z: this.spawn.z, yaw: 0, isSitting: false },
                 onCountChange: (n) => {
                     if (this.onlineBadge) this.onlineBadge.textContent = `${n} online`;
                 }
@@ -201,7 +209,6 @@ class Experience {
 
     setupPause() {
         this.pauseMenu = document.getElementById('pause-menu');
-        const btnPause = document.getElementById('btn-pause');
         const btnResume = document.getElementById('btn-resume');
         const btnPauseInvite = document.getElementById('btn-pause-invite');
         const btnExit = document.getElementById('btn-exit-menu');
@@ -213,9 +220,6 @@ class Experience {
             const el = document.activeElement;
             return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
         };
-
-        // Botão "Pausar" do HUD
-        btnPause.addEventListener('click', () => this.pause());
 
         // Esc com o mouse preso: o navegador solta o mouse e avisa por este evento
         document.addEventListener('pointerlockchange', () => {

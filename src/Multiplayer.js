@@ -126,13 +126,14 @@ function createGeometricAvatar(name, colorHex) {
 }
 
 export class MultiplayerManager {
-    constructor({ scene, playerName, chat, onCountChange }) {
+    constructor({ scene, playerName, chat, onCountChange, initialState }) {
         this.scene = scene;
         this.playerName = playerName;
         this.playerColor = colorFromName(playerName);
         this.chat = chat;
         this.onCountChange = onCountChange || (() => {});
 
+        this.initialState = initialState || { x: 0, y: 0, z: 6, yaw: 0, isSitting: false };
         this.roomId = MultiplayerManager.getRoomId();
         this.hostPeerId = `vnz-loft3d-host-${this.roomId}`;
 
@@ -155,10 +156,9 @@ export class MultiplayerManager {
         this.connect();
     }
 
+    // Sala única: todo mundo que abrir o link cai no "loft-principal"
     static getRoomId() {
-        const params = new URLSearchParams(window.location.search);
-        const raw = (params.get('sala') || 'loft-principal').toLowerCase().replace(/[^a-z0-9-]/g, '');
-        return raw || 'loft-principal';
+        return 'loft-principal';
     }
 
     connect() {
@@ -177,7 +177,7 @@ export class MultiplayerManager {
                 id: this.myId,
                 name: this.playerName,
                 color: this.playerColor,
-                state: { x: 0, y: 0, z: 6, yaw: 0, isSitting: false }
+                state: { ...this.initialState }
             });
             this.updateOnlineCount();
         });
@@ -220,7 +220,7 @@ export class MultiplayerManager {
                     id: this.myId,
                     name: this.playerName,
                     color: this.playerColor,
-                    state: { x: 0, y: 0, z: 6, yaw: 0, isSitting: false }
+                    state: { ...this.initialState }
                 });
             });
 
