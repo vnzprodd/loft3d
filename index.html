@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loft Industrial 3D</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="app"></div>
+
+    <!-- Indicador durante a transição para a experiência 3D -->
+    <div id="start-loading" class="start-loading" role="status" aria-live="polite" aria-label="Carregando experiência">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span>Preparando o ambiente...</span>
+    </div>
+
+    <!-- Menu Inicial -->
+    <div id="main-menu">
+        <div class="menu-content">
+            <h1>Loft Industrial 3D</h1>
+            <label class="name-label" for="player-name">Como quer ser chamado?</label>
+            <input id="player-name" class="name-input" type="text" maxlength="20"
+                   placeholder="Seu nome ou apelido" autocomplete="nickname">
+            <div class="menu-buttons">
+                <button id="btn-start" class="menu-btn primary">Iniciar</button>
+                <button id="btn-invite" class="menu-btn">Convidar</button>
+                <button id="btn-skins" class="menu-btn" type="button" disabled aria-disabled="true" title="Em breve">Skins</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ui">
+        <div class="instructions">
+            WASD mover &nbsp;·&nbsp; Mouse olhar &nbsp;·&nbsp; T chat &nbsp;·&nbsp; V falar &nbsp;·&nbsp; Q quadro
+        </div>
+    </div>
+
+    <!-- Chat de texto -->
+    <aside id="chat" aria-label="Chat de texto da sala">
+        <header id="chat-head">
+            <span class="chat-title">Chat da sala</span>
+            <span id="chat-badge" hidden></span>
+            <button id="chat-toggle" type="button" aria-label="Recolher o chat">–</button>
+        </header>
+        <div id="chat-messages" role="log" aria-live="polite"></div>
+        <form id="chat-form" autocomplete="off">
+            <input id="chat-input" type="text" maxlength="300" placeholder="Escreva e aperte Enter" aria-label="Mensagem">
+            <button type="submit">Enviar</button>
+        </form>
+    </aside>
+
+    <!-- Quadro branco -->
+    <div id="board-ui" hidden>
+        <div class="board-panel">
+            <div class="board-tools">
+                <span class="board-title">Quadro branco</span>
+
+                <div class="tool-group" role="group" aria-label="Cor da caneta">
+                    <button class="pen active" type="button" data-color="#111111" style="--c:#111111" aria-label="Caneta preta"></button>
+                    <button class="pen" type="button" data-color="#e01b24" style="--c:#e01b24" aria-label="Caneta vermelha"></button>
+                    <button class="pen" type="button" data-color="#1c71d8" style="--c:#1c71d8" aria-label="Caneta azul"></button>
+                    <button class="pen" type="button" data-color="#2ec27e" style="--c:#2ec27e" aria-label="Caneta verde"></button>
+                    <button class="pen" type="button" data-color="#e5a50a" style="--c:#e5a50a" aria-label="Caneta amarela"></button>
+                </div>
+
+                <div class="tool-group" role="group" aria-label="Espessura do traço">
+                    <button class="size" type="button" data-size="3">fina</button>
+                    <button class="size active" type="button" data-size="8">média</button>
+                    <button class="size" type="button" data-size="18">grossa</button>
+                </div>
+
+                <button id="board-eraser" class="tool-btn" type="button">Borracha</button>
+                <button id="board-clear" class="tool-btn" type="button">Limpar</button>
+                <button id="board-close" class="tool-btn primary" type="button">Fechar (Esc)</button>
+            </div>
+
+            <div class="board-stage">
+                <canvas id="board-canvas" width="2048" height="1024"></canvas>
+            </div>
+            <p class="board-help">Escolha uma caneta e desenhe com o mouse. O que você desenha aparece no quadro da sala na hora.</p>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
