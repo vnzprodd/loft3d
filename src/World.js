@@ -112,13 +112,21 @@ export class World {
         this.isMobile = isMobileDevice();
         this.colliders = []; // {minX,maxX,minZ,maxZ,minY,maxY}
 
-        this.matWood = new THREE.MeshStandardMaterial({ map: makeWoodTexture(), roughness: 0.9 });
-        this.matBlack = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.6, metalness: 0.5 });
-        this.matDarkGray = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 });
-        this.matMetal = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.8 });
-        this.matConcreteWall = new THREE.MeshStandardMaterial({ map: makeConcreteTexture(0x6f6f6d), roughness: 1 });
+        this.matWood = this.mat({ map: makeWoodTexture(), roughness: 0.9 });
+        this.matBlack = this.mat({ color: 0x141414, roughness: 0.6, metalness: 0.5 });
+        this.matDarkGray = this.mat({ color: 0x2a2a2a, roughness: 0.8 });
+        this.matMetal = this.mat({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.8 });
+        this.matConcreteWall = this.mat({ map: makeConcreteTexture(0x6f6f6d), roughness: 1 });
 
         this.init();
+    }
+
+    mat(opts) {
+        if (this.isMobile) {
+            const { roughness, metalness, ...rest } = opts;
+            return new THREE.MeshLambertMaterial(rest);
+        }
+        return new THREE.MeshStandardMaterial(opts);
     }
 
     box(w, h, d, mat, x, y, z, ry = 0, castShadow = true) {
@@ -126,7 +134,7 @@ export class World {
         m.position.set(x, y, z);
         m.rotation.y = ry;
         m.castShadow = castShadow && !this.isMobile;
-        m.receiveShadow = true;
+        m.receiveShadow = !this.isMobile;
         this.scene.add(m);
         return m;
     }
@@ -192,18 +200,18 @@ export class World {
         tex.repeat.set(8, 10);
         const floor = new THREE.Mesh(
             new THREE.PlaneGeometry(16, 20),
-            new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 })
+            this.mat({ map: tex, roughness: 0.85 })
         );
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(0, 0, 0);
-        floor.receiveShadow = true;
+        floor.receiveShadow = !this.isMobile;
         this.scene.add(floor);
     }
 
     createCeiling() {
         const ceil = new THREE.Mesh(
             new THREE.PlaneGeometry(16, 20),
-            new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 1 })
+            this.mat({ color: 0x3a3a3a, roughness: 1 })
         );
         ceil.rotation.x = Math.PI / 2;
         ceil.position.set(0, 6, 0);
@@ -215,20 +223,30 @@ export class World {
         tex.repeat.set(3, 10);
         const deck = new THREE.Mesh(
             new THREE.PlaneGeometry(5, 20),
-            new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 })
+            this.mat({ map: tex, roughness: 0.85 })
         );
         deck.rotation.x = -Math.PI / 2;
         deck.position.set(10.5, 0.005, 0);
-        deck.receiveShadow = true;
+        deck.receiveShadow = !this.isMobile;
         this.scene.add(deck);
 
-        const glassMat = new THREE.MeshStandardMaterial({
-            color: 0xbcccd8, transparent: true, opacity: 0.28, roughness: 0.15
-        });
+        const glassMat = this.isMobile
+            ? new THREE.MeshBasicMaterial({
+                color: 0xbcccd8, transparent: true, opacity: 0.24,
+                side: THREE.DoubleSide, depthWrite: false
+            })
+            : new THREE.MeshStandardMaterial({
+                color: 0xbcccd8, transparent: true, opacity: 0.28, roughness: 0.15
+            });
+
         [[-6.5, 7], [6.5, 7]].forEach(([z, len]) => {
-            const g = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1, len), glassMat);
+            const g = this.isMobile
+                ? new THREE.Mesh(new THREE.PlaneGeometry(len, 1), glassMat)
+                : new THREE.Mesh(new THREE.BoxGeometry(0.04, 1, len), glassMat);
             g.position.set(13, 0.5, z);
+            if (this.isMobile) g.rotation.y = Math.PI / 2;
             this.scene.add(g);
+
             const top = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, len), this.matMetal);
             top.position.set(13, 1.02, z);
             this.scene.add(top);
@@ -238,23 +256,25 @@ export class World {
     createBeach() {
         const sand = new THREE.Mesh(
             new THREE.PlaneGeometry(26, 90),
-            new THREE.MeshStandardMaterial({ color: 0xe2cf9f, roughness: 1 })
+            this.mat({ color: 0xe2cf9f, roughness: 1 })
         );
         sand.rotation.x = -Math.PI / 2;
         sand.position.set(21, -0.01, 0);
-        sand.receiveShadow = true;
+        sand.receiveShadow = !this.isMobile;
         this.scene.add(sand);
 
         const sea = new THREE.Mesh(
             new THREE.PlaneGeometry(400, 400),
-            new THREE.MeshStandardMaterial({ color: 0x2f7fb5, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.9 })
+            this.isMobile
+                ? new THREE.MeshLambertMaterial({ color: 0x2f7fb5, transparent: false })
+                : new THREE.MeshStandardMaterial({ color: 0x2f7fb5, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.9 })
         );
         sea.rotation.x = -Math.PI / 2;
         sea.position.set(34 + 200, 0.0, 0);
         this.scene.add(sea);
 
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1 });
-        const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f6b2f, roughness: 1 });
+        const trunkMat = this.mat({ color: 0x6b4a2b, roughness: 1 });
+        const leafMat = this.mat({ color: 0x2f6b2f, roughness: 1 });
         [[17, -12], [19, 9], [23, -4], [26, 14], [16, 17]].forEach(([x, z]) => {
             const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 4, 6), trunkMat);
             trunk.position.set(x, 2, z);
@@ -274,10 +294,10 @@ export class World {
         const w = 16, d = 15, h = 3.6;
         const cx = 0, cz = -17.5;
         const baseY = GALLERY_FLOOR_Y;
-        const wallMat = new THREE.MeshStandardMaterial({
+        const wallMat = this.mat({
             map: makeConcreteTexture(0x777777), roughness: 1
         });
-        const floorMat = new THREE.MeshStandardMaterial({
+        const floorMat = this.mat({
             map: makeConcreteTexture(0x888888), roughness: 0.9
         });
 
@@ -291,7 +311,6 @@ export class World {
         ceil.position.set(cx, baseY + h, cz);
         this.scene.add(ceil);
 
-        // Sala interna fechada: não precisa projetar sombra no mapa solar externo
         this.box(0.2, h, d, wallMat, -8, baseY + h / 2, cz, 0, false);
         this.box(0.2, h, d, wallMat, 8, baseY + h / 2, cz, 0, false);
         this.box(w, h, 0.2, wallMat, cx, baseY + h / 2, -25, 0, false);
@@ -302,7 +321,7 @@ export class World {
         this.box(doorR - doorL, h - doorH, 0.2, wallMat,
             0, baseY + doorH + (h - doorH) / 2, -10, 0, false);
 
-        const trim = new THREE.MeshStandardMaterial({ color: 0x242424, roughness: 0.45, metalness: 0.7 });
+        const trim = this.mat({ color: 0x242424, roughness: 0.45, metalness: 0.7 });
         [-7.86, 7.86].forEach(x => this.box(0.08, 0.16, d, trim, x, baseY + 0.08, cz, 0, false));
         this.box(w, 0.16, 0.08, trim, 0, baseY + 0.08, -24.86, 0, false);
 
@@ -312,8 +331,8 @@ export class World {
         this.addCollider(-4.8, -10, 6.4, 0.3, baseY, baseY + h);
         this.addCollider(4.8, -10, 6.4, 0.3, baseY, baseY + h);
 
-        const plinthMat = new THREE.MeshStandardMaterial({ color: 0x171719, roughness: 0.38, metalness: 0.58 });
-        const topMat = new THREE.MeshStandardMaterial({ color: 0x77777d, roughness: 0.28, metalness: 0.82 });
+        const plinthMat = this.mat({ color: 0x171719, roughness: 0.38, metalness: 0.58 });
+        const topMat = this.mat({ color: 0x77777d, roughness: 0.28, metalness: 0.82 });
         const displayPoints = [
             [-5.6, -13.2], [5.6, -13.2],
             [-5.6, -18.2], [5.6, -18.2],
@@ -364,8 +383,8 @@ export class World {
         const rise = GALLERY_FLOOR_Y / steps;
         const stepRun = run / steps;
         const treadDepth = stepRun + 0.035;
-        const treadMat = new THREE.MeshStandardMaterial({ map: makeWoodTexture(0x6b4528), roughness: 0.72 });
-        const riserMat = new THREE.MeshStandardMaterial({ color: 0x242424, roughness: 0.62, metalness: 0.35 });
+        const treadMat = this.mat({ map: makeWoodTexture(0x6b4528), roughness: 0.72 });
+        const riserMat = this.mat({ color: 0x242424, roughness: 0.62, metalness: 0.35 });
 
         for (let i = 0; i < steps; i++) {
             const topY = (i + 1) * rise;
@@ -374,7 +393,7 @@ export class World {
             const tread = new THREE.Mesh(new THREE.BoxGeometry(stairWidth, 0.12, treadDepth), treadMat);
             tread.position.set(0, topY - 0.06, z);
             tread.castShadow = !this.isMobile;
-            tread.receiveShadow = true;
+            tread.receiveShadow = !this.isMobile;
             this.scene.add(tread);
 
             const riser = new THREE.Mesh(new THREE.BoxGeometry(stairWidth, rise, 0.07), riserMat);
@@ -406,12 +425,25 @@ export class World {
             this.scene.add(handrail);
         });
 
-        const glassRail = new THREE.Mesh(
-            new THREE.BoxGeometry(0.035, 0.82, run + 0.15),
-            new THREE.MeshStandardMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.24, roughness: 0.1 })
-        );
+        const glassRailMat = this.isMobile
+            ? new THREE.MeshBasicMaterial({
+                color: 0xbcccd8, transparent: true, opacity: 0.2,
+                side: THREE.DoubleSide, depthWrite: false
+            })
+            : new THREE.MeshStandardMaterial({
+                color: 0xbcccd8, transparent: true, opacity: 0.24, roughness: 0.1
+            });
+        const glassRail = this.isMobile
+            ? new THREE.Mesh(new THREE.PlaneGeometry(run + 0.15, 0.82), glassRailMat)
+            : new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.82, run + 0.15), glassRailMat);
         glassRail.position.set(0.98, GALLERY_FLOOR_Y / 2 + 0.72, stairCenterZ);
-        glassRail.rotation.x = slope;
+        if (this.isMobile) {
+            glassRail.rotation.order = 'YXZ';
+            glassRail.rotation.y = Math.PI / 2;
+            glassRail.rotation.x = -slope;
+        } else {
+            glassRail.rotation.x = slope;
+        }
         this.scene.add(glassRail);
 
         this.addCollider(-1.25, stairCenterZ, 0.12, run + 0.25, 0, GALLERY_FLOOR_Y + 0.8);
@@ -454,22 +486,39 @@ export class World {
         this.scene.add(windowFrame);
         const glass = new THREE.Mesh(
             new THREE.PlaneGeometry(2.8, 1.8),
-            new THREE.MeshStandardMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.38, side: THREE.DoubleSide })
+            this.isMobile
+                ? new THREE.MeshBasicMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false })
+                : new THREE.MeshStandardMaterial({ color: 0xbcccd8, transparent: true, opacity: 0.38, side: THREE.DoubleSide })
         );
         glass.position.set(0, 3, 10);
         glass.rotation.y = Math.PI;
         this.scene.add(glass);
 
-        // Transparência leve sem `transmission` (evita renderizar a cena 2x por frame)
-        const glassMat = new THREE.MeshStandardMaterial({
-            color: 0xc8d7e4, metalness: 0.1, roughness: 0.08,
-            transparent: true, opacity: 0.24, side: THREE.DoubleSide
-        });
+        // No celular usa plano simples sem iluminação PBR para eliminar overdraw na travessia da porta
+        const glassMat = this.isMobile
+            ? new THREE.MeshBasicMaterial({
+                color: 0xc8d7e4,
+                transparent: true,
+                opacity: 0.2,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            })
+            : new THREE.MeshStandardMaterial({
+                color: 0xc8d7e4, metalness: 0.1, roughness: 0.08,
+                transparent: true, opacity: 0.24, side: THREE.DoubleSide
+            });
         const frameMat = this.matBlack;
         const addGlassPanel = (z, length, x = 8) => {
-            const panel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 5.55, length), glassMat);
-            panel.position.set(x, 2.8, z);
-            this.scene.add(panel);
+            if (this.isMobile) {
+                const panel = new THREE.Mesh(new THREE.PlaneGeometry(length, 5.55), glassMat);
+                panel.position.set(x, 2.8, z);
+                panel.rotation.y = Math.PI / 2;
+                this.scene.add(panel);
+            } else {
+                const panel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 5.55, length), glassMat);
+                panel.position.set(x, 2.8, z);
+                this.scene.add(panel);
+            }
         };
         addGlassPanel(-5.7, 8.6);
         addGlassPanel(5.7, 8.6);
@@ -493,11 +542,11 @@ export class World {
         const slabCenterZ = -6.6;
         const slab = new THREE.Mesh(
             new THREE.BoxGeometry(16, 0.25, slabDepth),
-            new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 })
+            this.mat({ map: tex, roughness: 0.9 })
         );
         slab.position.set(0, GALLERY_FLOOR_Y - 0.125, slabCenterZ);
         slab.castShadow = !this.isMobile;
-        slab.receiveShadow = true;
+        slab.receiveShadow = !this.isMobile;
         this.scene.add(slab);
 
         this.box(0.3, 0.4, slabDepth, this.matMetal, -7.85, GALLERY_FLOOR_Y - 0.275, slabCenterZ);
@@ -533,11 +582,11 @@ export class World {
         const levelOffset = GALLERY_FLOOR_Y - 2.725;
         const bedG = new THREE.Group();
         const frame = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.3, 2.6), this.matMetal);
-        const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.35, 2.4), new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 1 }));
+        const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.35, 2.4), this.mat({ color: 0x1e1e1e, roughness: 1 }));
         mattress.position.y = 0.32;
-        const pillow = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.2, 0.45), new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 1 }));
+        const pillow = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.2, 0.45), this.mat({ color: 0x555555, roughness: 1 }));
         pillow.position.set(0, 0.55, -0.85);
-        const blanket = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.16, 1.5), new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 1 }));
+        const blanket = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.16, 1.5), this.mat({ color: 0x3a3f45, roughness: 1 }));
         blanket.position.set(0, 0.5, 0.35);
         frame.add(mattress, pillow, blanket);
         bedG.add(frame);
@@ -549,7 +598,7 @@ export class World {
         const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.22, 8), this.matDarkGray);
         pot.position.set(-1.3, 2.85 + levelOffset, -4.1);
         this.scene.add(pot);
-        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 6), new THREE.MeshStandardMaterial({ color: 0x2f4f2f, roughness: 1 }));
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 6), this.mat({ color: 0x2f4f2f, roughness: 1 }));
         leaf.position.set(-1.3, 3.05 + levelOffset, -4.1);
         leaf.scale.y = 1.5;
         this.scene.add(leaf);
@@ -557,10 +606,10 @@ export class World {
 
     createKitchen() {
         this.box(6.5, 0.85, 0.6, this.matBlack, -4.7, 0.42, -9.5);
-        this.box(6.5, 0.06, 0.68, new THREE.MeshStandardMaterial({ color: 0x4a4a48, roughness: 0.4 }), -4.7, 0.88, -9.5);
+        this.box(6.5, 0.06, 0.68, this.mat({ color: 0x4a4a48, roughness: 0.4 }), -4.7, 0.88, -9.5);
         this.addCollider(-4.7, -9.5, 6.5, 0.7);
 
-        this.box(0.85, 1.9, 0.65, new THREE.MeshStandardMaterial({ color: 0x303030, roughness: 0.3, metalness: 0.7 }), -0.9, 0.95, -9.5);
+        this.box(0.85, 1.9, 0.65, this.mat({ color: 0x303030, roughness: 0.3, metalness: 0.7 }), -0.9, 0.95, -9.5);
         this.addCollider(-0.9, -9.5, 0.95, 0.75);
 
         for (let i = 0; i < 2; i++) {
@@ -575,10 +624,10 @@ export class World {
         }
 
         const islandTex = makeConcreteTexture(0x7d7b78);
-        const island = new THREE.Mesh(new THREE.BoxGeometry(3, 0.85, 1.1), new THREE.MeshStandardMaterial({ map: islandTex, roughness: 0.9 }));
+        const island = new THREE.Mesh(new THREE.BoxGeometry(3, 0.85, 1.1), this.mat({ map: islandTex, roughness: 0.9 }));
         island.position.set(-4.5, 0.42, -6.8);
         island.castShadow = !this.isMobile;
-        island.receiveShadow = true;
+        island.receiveShadow = !this.isMobile;
         this.scene.add(island);
         this.addCollider(-4.5, -6.8, 3, 1.1);
 
@@ -589,7 +638,7 @@ export class World {
 
         for (let i = 0; i < 3; i++) {
             const g = new THREE.Group();
-            const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 10), new THREE.MeshStandardMaterial({ color: 0x5a3a28, roughness: 0.8 }));
+            const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 10), this.mat({ color: 0x5a3a28, roughness: 0.8 }));
             seat.position.y = 0.62;
             g.add(seat);
             for (let l = 0; l < 3; l++) {
@@ -609,7 +658,7 @@ export class World {
             pot.castShadow = !this.isMobile;
             this.scene.add(pot);
             for (let l = 0; l < 6; l++) {
-                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.9, 5), new THREE.MeshStandardMaterial({ color: 0x2e4d2e, roughness: 1 }));
+                const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.9, 5), this.mat({ color: 0x2e4d2e, roughness: 1 }));
                 leaf.position.set(x + Math.random() * 0.25 - 0.12, 0.75, z + Math.random() * 0.25 - 0.12);
                 leaf.rotation.z = Math.random() * 0.6 - 0.3;
                 leaf.rotation.x = Math.random() * 0.6 - 0.3;
@@ -619,19 +668,19 @@ export class World {
     }
 
     createLivingArea() {
-        const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 1 }));
+        const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), this.mat({ color: 0x222222, roughness: 1 }));
         rug.rotation.x = -Math.PI / 2;
         rug.position.set(4, 0.01, 4.2);
-        rug.receiveShadow = true;
+        rug.receiveShadow = !this.isMobile;
         this.scene.add(rug);
 
-        const sofaMat = new THREE.MeshStandardMaterial({ color: 0x181818, roughness: 1 });
+        const sofaMat = this.mat({ color: 0x181818, roughness: 1 });
         this.box(1.2, 0.4, 2.8, sofaMat, 5.3, 0.28, 4);
         this.box(0.3, 0.6, 2.8, sofaMat, 5.95, 0.55, 4);
         this.box(2.4, 0.4, 1.1, sofaMat, 4.5, 0.28, 2.85);
         this.box(2.4, 0.6, 0.3, sofaMat, 4.5, 0.55, 2.35);
         for (let i = 0; i < 3; i++) {
-            this.box(0.85, 0.16, 0.9, new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 1 }), 5.3, 0.55, 3 + i * 0.95);
+            this.box(0.85, 0.16, 0.9, this.mat({ color: 0x2c2c2c, roughness: 1 }), 5.3, 0.55, 3 + i * 0.95);
         }
         this.addCollider(5.5, 4, 1.6, 3);
         this.addCollider(4.5, 2.85, 2.6, 1.3);
@@ -650,21 +699,22 @@ export class World {
     }
 
     createLights() {
-        this.scene.add(new THREE.AmbientLight(0x30343c, this.isMobile ? 1.45 : 1.2));
+        this.scene.add(new THREE.AmbientLight(0x30343c, this.isMobile ? 1.55 : 1.2));
 
         const sun = new THREE.DirectionalLight(0xfff2e0, 2.4);
         sun.position.set(14, 8, 3);
         sun.target.position.set(-3, 0, 0);
-        sun.castShadow = true;
-        const shadowRes = this.isMobile ? 1024 : 2048;
-        sun.shadow.mapSize.set(shadowRes, shadowRes);
-        sun.shadow.bias = -0.0005;
-        sun.shadow.camera.near = 1;
-        sun.shadow.camera.far = 45;
-        sun.shadow.camera.left = -15;
-        sun.shadow.camera.right = 15;
-        sun.shadow.camera.top = 15;
-        sun.shadow.camera.bottom = -15;
+        if (!this.isMobile) {
+            sun.castShadow = true;
+            sun.shadow.mapSize.set(2048, 2048);
+            sun.shadow.bias = -0.0005;
+            sun.shadow.camera.near = 1;
+            sun.shadow.camera.far = 45;
+            sun.shadow.camera.left = -15;
+            sun.shadow.camera.right = 15;
+            sun.shadow.camera.top = 15;
+            sun.shadow.camera.bottom = -15;
+        }
         this.scene.add(sun, sun.target);
 
         [-5.6, -4.5, -3.4].forEach(x => {

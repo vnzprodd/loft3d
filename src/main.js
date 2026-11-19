@@ -152,7 +152,6 @@ class Experience {
             }
             if (mat.transparent) {
                 mat.depthWrite = false;
-                mat.side = THREE.FrontSide;
             }
         };
 
@@ -203,7 +202,7 @@ class Experience {
 
             if (obj.isLight) {
                 if (obj.isAmbientLight || obj.isHemisphereLight) {
-                    obj.intensity *= 1.3;
+                    obj.intensity *= 1.25;
                 } else if (obj.isDirectionalLight) {
                     obj.castShadow = false;
                 } else if (obj.isSpotLight) {
@@ -285,7 +284,6 @@ class Experience {
             box.getCenter(center);
             box.getSize(size);
 
-            // Não mescla planos gigantes (chão/oceano/céu) junto com props pequenos
             if (Math.max(size.x, size.z) > 45) return;
 
             let zone = 'interior';
@@ -350,7 +348,6 @@ class Experience {
             }
         }
 
-        // Registra objetos pequenos que ficaram soltos na praia para culling por distância
         this.scene.traverse((obj) => {
             if (!obj.isMesh || !obj.visible || protectedObjects.has(obj)) return;
             box.setFromObject(obj);
@@ -365,6 +362,26 @@ class Experience {
                 });
             }
         });
+    }
+
+    warmupMobileGPU() {
+        const saved = [];
+        this.scene.traverse((obj) => {
+            if (obj.isMesh || obj.isPoints || obj.isLine) {
+                saved.push([obj, obj.frustumCulled]);
+                obj.frustumCulled = false;
+            }
+        });
+        try {
+            this.renderer.compile(this.scene, this.cameraManager.camera);
+            this.renderer.render(this.scene, this.cameraManager.camera);
+        } catch (err) {
+            console.warn('Warm-up GPU ignorado:', err);
+        } finally {
+            for (const [obj, flag] of saved) {
+                obj.frustumCulled = flag;
+            }
+        }
     }
 
     async copyInviteLink(button, originalLabel) {
@@ -465,6 +482,9 @@ class Experience {
             this.clock.getDelta();
 
             setTimeout(() => {
+                if (IS_MOBILE) {
+                    this.warmupMobileGPU();
+                }
                 this.clock.getDelta();
                 this.render();
             }, 120);
@@ -552,7 +572,6 @@ class Experience {
         const deltaTime = Math.min(rawDelta, 0.1);
         this.frameCount++;
 
-        // Escala dinâmica de resolução no mobile para manter fluidez ao olhar para a praia
         if (IS_MOBILE && !this.paused) {
             if (rawDelta > 0.036) {
                 this.slowFrames++;
@@ -589,10 +608,16 @@ class Experience {
                 }
             }
 
-            if (!IS_MOBILE || this.frameCount % 2 === 0) {
+            if (!IS_MOBILE) {
                 this.tvPyramid.update(this.player.group.position);
                 this.projector.update(this.player.group.position);
                 this.meetingRoom.update(this.player.group.position);
+            } else {
+                // Intercala as telas dinâmicas em frames diferentes para evitar pico ao cruzar a porta
+                const slot = this.frameCount % 4;
+                if (slot === 0) this.tvPyramid.update(this.player.group.position);
+                else if (slot === 1) this.projector.update(this.player.group.position);
+                else if (slot === 2) this.meetingRoom.update(this.player.group.position);
             }
         }
 
@@ -609,8 +634,9 @@ class Experience {
 
         this.renderer.render(this.scene, this.cameraManager.camera);
 
-        if (this.loadingOverlay && this.loadingOverlay.classList.contains('active')) {
+        if (this.loadingOverlay) {
             this.loadingOverlay.classList.remove('active');
+            this.loadingOverlay = null;
         }
     }
 }
