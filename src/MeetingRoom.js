@@ -2,40 +2,41 @@ import * as THREE from 'three';
 import { makeWoodTexture, makeConcreteTexture } from './World.js';
 import { Whiteboard } from './Whiteboard.js';
 
-// Sala de reuniao atras da parede do fundo, alcancada pela porta em z=-10.
-// Fundo x 0.5..8, z -17..-10, pe direito 3.6.
+const isMobileDevice = () =>
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+
 export class MeetingRoom {
     constructor(scene, world) {
         this.scene = scene;
         this.world = world;
+        this.isMobile = isMobileDevice();
 
         this.x0 = 0.5;
-        this.x1 = 12;       // Expanded from 8
-        this.z0 = -25;      // Expanded from -17
+        this.x1 = 12;
+        this.z0 = -25;
         this.z1 = -10;
         this.ceilH = 3.6;
 
-        this.chairs = []; // Store for sitting logic
+        this.chairs = [];
 
         this.build();
         this.buildFurniture();
         this.buildLights();
 
         this.whiteboard = new Whiteboard(scene, {
-            // Face interna: afastar o quadro da espessura da parede traseira.
             position: new THREE.Vector3((this.x0 + this.x1) / 2, 2.0, this.z0 + 0.22),
-            width: 6,       // Slightly wider
+            width: 6,
             height: 2.5
         });
     }
 
     build() {
-        const w = this.x1 - this.x0;   // 11.5
-        const d = this.z1 - this.z0;   // 15
+        const w = this.x1 - this.x0;
+        const d = this.z1 - this.z0;
         const cx = (this.x0 + this.x1) / 2;
         const cz = (this.z0 + this.z1) / 2;
 
-        // piso — carpete cinza
         const carpet = makeConcreteTexture(0x9c9891);
         carpet.repeat.set(6, 8);
         const floor = new THREE.Mesh(
@@ -44,10 +45,8 @@ export class MeetingRoom {
         );
         floor.rotation.x = -Math.PI / 2;
         floor.position.set(cx, 0.005, cz);
-        floor.receiveShadow = true;
         this.scene.add(floor);
 
-        // teto
         const ceilTex = makeWoodTexture();
         ceilTex.repeat.set(3, 4);
         const ceil = new THREE.Mesh(
@@ -64,16 +63,12 @@ export class MeetingRoom {
             side: THREE.DoubleSide
         });
 
-        // Paredes laterais e do fundo com espessura real.
-        // Cada volume recebe um colisor com a mesma área e altura.
         const addSolidWall = (width, height, depth, x, y, z) => {
             const wall = new THREE.Mesh(
                 new THREE.BoxGeometry(width, height, depth),
                 wallMat
             );
             wall.position.set(x, y, z);
-            wall.castShadow = true;
-            wall.receiveShadow = true;
             this.scene.add(wall);
             this.world.addCollider(x, z, width, depth, 0, height);
             return wall;
@@ -83,8 +78,6 @@ export class MeetingRoom {
         addSolidWall(0.22, this.ceilH, d, this.x1, this.ceilH / 2, cz);
         addSolidWall(w, this.ceilH, 0.22, cx, this.ceilH / 2, this.z0);
 
-        // O trecho x=8..12 não existe na parede do loft: fecha essa extensão
-        // com uma parede sólida, sem bloquear o vão da porta (x=3.1..4.7).
         const extensionWidth = Math.max(0, this.x1 - 8);
         if (extensionWidth > 0) {
             addSolidWall(
@@ -93,10 +86,6 @@ export class MeetingRoom {
             );
         }
 
-        // A parede de entrada é formada por volumes sólidos em World.js e pela extensão desta sala.
-        // Removidos planos decorativos de uma face só que criavam áreas visualmente inconsistentes.
-
-        // rodape
         const skirtMat = new THREE.MeshStandardMaterial({ color: 0x3a3a38, roughness: 0.8 });
         const skirt = (bw, bx, bz, rotY) => {
             const s = new THREE.Mesh(new THREE.BoxGeometry(bw, 0.12, 0.04), skirtMat);
@@ -108,7 +97,6 @@ export class MeetingRoom {
         skirt(d, this.x1 - 0.12, cz, Math.PI / 2);
         skirt(w, cx, this.z0 + 0.12, 0);
 
-        // batentes da porta
         const jambMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.7 });
         [3.1, 4.7].forEach(x => {
             const j = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.45, 0.26), jambMat);
@@ -118,20 +106,17 @@ export class MeetingRoom {
         const head = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.09, 0.26), jambMat);
         head.position.set(3.9, 2.42, -10);
         this.scene.add(head);
-
     }
 
     buildFurniture() {
         const cx = (this.x0 + this.x1) / 2;
-        const tableZ = -17.5; // Moved deeper into the expanded room
+        const tableZ = -17.5;
 
-        // mesa de madeira maior
         const tableTex = makeWoodTexture(0xc79a5b);
         tableTex.repeat.set(3, 1);
         const tableMat = new THREE.MeshStandardMaterial({ map: tableTex, roughness: 0.7 });
         const top = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.09, 2.0), tableMat);
         top.position.set(cx, 0.74, tableZ);
-        top.castShadow = top.receiveShadow = true;
         this.scene.add(top);
 
         const apronMat = new THREE.MeshStandardMaterial({ color: 0xa87f47, roughness: 0.8 });
@@ -143,23 +128,21 @@ export class MeetingRoom {
         [[-2.7, -0.7], [2.7, -0.7], [-2.7, 0.7], [2.7, 0.7]].forEach(([dx, dz]) => {
             const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.1), legMat);
             leg.position.set(cx + dx, 0.35, tableZ + dz);
-            leg.castShadow = true;
             this.scene.add(leg);
         });
         this.world.addCollider(cx, tableZ, 6.0, 2.0, 0, 0.85);
 
-        // 8 cadeiras
+        const matSeat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.85 });
         const chairAt = (x, z, ry) => {
             const g = new THREE.Group();
-            const matSeat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.85 });
 
             const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.48), matSeat);
             seat.position.y = 0.46;
             const back = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.52, 0.07), matSeat);
             back.position.set(0, 0.74, -0.23);
-            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.36, 8), legMat);
+            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.36, 6), legMat);
             stem.position.y = 0.28;
-            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 8), legMat);
+            const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 6), legMat);
             hub.position.y = 0.1;
             g.add(seat, back, stem, hub);
 
@@ -168,7 +151,7 @@ export class MeetingRoom {
                 const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.035, 0.045), legMat);
                 spoke.position.set(Math.cos(a) * 0.16, 0.08, Math.sin(a) * 0.16);
                 spoke.rotation.y = -a;
-                const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 8), matSeat);
+                const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 6), matSeat);
                 wheel.position.set(Math.cos(a) * 0.3, 0.045, Math.sin(a) * 0.3);
                 g.add(spoke, wheel);
             }
@@ -181,23 +164,18 @@ export class MeetingRoom {
 
             g.position.set(x, 0, z);
             g.rotation.y = ry;
-            g.traverse(o => { o.castShadow = true; });
             this.scene.add(g);
             this.world.addCollider(x, z, 0.62, 0.62, 0, 1.05);
 
-            // Save chair data for sitting logic
             this.chairs.push({ position: new THREE.Vector3(x, 0, z), rotation: ry });
         };
 
-        // Oito cadeiras distribuídas nas duas laterais compridas da mesa.
-        // O afastamento evita que os colliders das cadeiras se sobreponham ao tampo.
         const chairOffsetsX = [-2.15, -0.72, 0.72, 2.15];
         chairOffsetsX.forEach(offsetX => {
             chairAt(cx + offsetX, tableZ - 2.25, 0);
             chairAt(cx + offsetX, tableZ + 2.25, Math.PI);
         });
 
-        // Notebooks and plants...
         const laptopBase = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.02, 0.3), legMat);
         laptopBase.position.set(cx - 0.3, 0.8, tableZ + 0.1);
         laptopBase.rotation.y = 0.25;
@@ -215,9 +193,8 @@ export class MeetingRoom {
         const potMat = new THREE.MeshStandardMaterial({ color: 0x7d7a74, roughness: 0.9 });
         const leafMat = new THREE.MeshStandardMaterial({ color: 0x35672f, roughness: 1 });
         [[this.x0 + 0.7, this.z0 + 0.9], [this.x1 - 0.7, this.z0 + 0.9]].forEach(([x, z]) => {
-            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.42, 12), potMat);
+            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.17, 0.42, 8), potMat);
             pot.position.set(x, 0.21, z);
-            pot.castShadow = true;
             this.scene.add(pot);
             for (let i = 0; i < 7; i++) {
                 const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.85, 5), leafMat);
@@ -233,17 +210,16 @@ export class MeetingRoom {
     buildLights() {
         const cx = (this.x0 + this.x1) / 2;
 
-        // Pendants over table
         [-1.5, 1.5].forEach(dx => {
             const shade = new THREE.Mesh(
-                new THREE.ConeGeometry(0.22, 0.24, 16, 1, true),
+                new THREE.ConeGeometry(0.22, 0.24, 10, 1, true),
                 new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide })
             );
             shade.position.set(cx + dx, 2.85, -17.5);
             this.scene.add(shade);
 
             const bulb = new THREE.Mesh(
-                new THREE.SphereGeometry(0.055, 10, 10),
+                new THREE.SphereGeometry(0.055, 8, 8),
                 new THREE.MeshBasicMaterial({ color: 0xffd6a0 })
             );
             bulb.position.set(cx + dx, 2.78, -17.5);
@@ -256,19 +232,18 @@ export class MeetingRoom {
             wire.position.set(cx + dx, (this.ceilH + 2.95) / 2, -17.5);
             this.scene.add(wire);
 
-            const pt = new THREE.PointLight(0xffc98a, 9, 8, 2);
-            pt.position.set(cx + dx, 2.7, -17.5);
-            this.scene.add(pt);
+            if (!this.isMobile) {
+                const pt = new THREE.PointLight(0xffc98a, 9, 8, 2);
+                pt.position.set(cx + dx, 2.7, -17.5);
+                this.scene.add(pt);
+            }
         });
 
-        // Wash light for whiteboard
         const wash = new THREE.SpotLight(0xffffff, 16, 9, Math.PI / 5, 0.5, 1.6);
         wash.position.set(cx, this.ceilH - 0.1, this.z0 + 1.6);
         wash.target.position.set(cx, 1.6, this.z0);
         this.scene.add(wash, wash.target);
 
-        // TV da sala de reunião. A superfície é conectada ao mesmo controlador
-        // de compartilhamento do projetor principal em main.js.
         const tvFrameMat = new THREE.MeshStandardMaterial({
             color: 0x090a0c, roughness: 0.38, metalness: 0.72
         });
@@ -277,7 +252,6 @@ export class MeetingRoom {
             tvFrameMat
         );
         tvFrame.position.set(this.x0 + 0.25, 2.0, -17.5);
-        tvFrame.castShadow = true;
         this.scene.add(tvFrame);
 
         const screenMat = new THREE.MeshBasicMaterial({
@@ -287,18 +261,17 @@ export class MeetingRoom {
             new THREE.PlaneGeometry(2.96, 1.76),
             screenMat
         );
-        // A parede tem 0,22 m de espessura; a tela fica à frente da face interna.
         this.transmissionScreen.position.set(this.x0 + 0.31, 2.0, -17.5);
         this.transmissionScreen.rotation.y = Math.PI / 2;
         this.scene.add(this.transmissionScreen);
 
-        // brilho discreto para a moldura quando a transmissão está desligada
-        const glow = new THREE.PointLight(0x4466ff, 2.2, 4.5);
-        glow.position.set(this.x0 + 0.42, 2.0, -17.5);
-        this.scene.add(glow);
+        if (!this.isMobile) {
+            const glow = new THREE.PointLight(0x4466ff, 2.2, 4.5);
+            glow.position.set(this.x0 + 0.42, 2.0, -17.5);
+            this.scene.add(glow);
+        }
 
-        // general light
-        const fill = new THREE.PointLight(0xdfe6f0, 8, 12, 2);
+        const fill = new THREE.PointLight(0xdfe6f0, this.isMobile ? 14 : 8, 15, 1.8);
         fill.position.set(cx, 2.9, -17.5);
         this.scene.add(fill);
     }

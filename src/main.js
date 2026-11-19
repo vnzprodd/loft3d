@@ -17,17 +17,23 @@ class Experience {
         this.started = false;
         this.paused = false;
 
+        const isMobile = window.matchMedia('(pointer: coarse)').matches ||
+            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        this.isMobile = isMobile;
+
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87b5dd);
         this.scene.fog = new THREE.FogExp2(0x87b5dd, 0.006);
 
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: !isMobile,
+            stencil: false,
+            powerPreference: 'high-performance'
+        });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        // Celular: limite menor de resolução para andar mais fluido
-        const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isTouchDevice ? 1.25 : 1.75));
+        this.renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio || 1, 1.75));
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
 
         this.clock = new THREE.Clock();
@@ -68,7 +74,6 @@ class Experience {
 
         this.player = new Player(this.scene);
         this.player.world = this.world;
-        // Cada jogador nasce num ponto livre diferente, para não nascer em cima de outro
         const spawnXs = [-4, -2.5, -1, 0.5, 2];
         const spawnZs = [5.5, 7, 8.5];
         this.spawn = {
@@ -80,7 +85,6 @@ class Experience {
         this.cameraManager = new CameraManager(this.scene, this.player, this.renderer.domElement);
         this.player.camera = this.cameraManager.camera;
 
-        // Controles de toque (só aparecem no celular/tablet, depois de Iniciar)
         this.touch = new TouchControls({
             player: this.player,
             cameraManager: this.cameraManager,
@@ -99,13 +103,11 @@ class Experience {
 
         window.addEventListener('resize', () => this.onWindowResize());
 
-        // Fecha a conexão com os outros jogadores ao sair da página
         window.addEventListener('beforeunload', () => {
             if (this.multiplayer) this.multiplayer.disconnect();
         });
     }
 
-    // Copia o link da sala e mostra um aviso curto no próprio botão
     async copyInviteLink(button, originalLabel) {
         const inviteUrl = new URL(window.location.href);
         inviteUrl.search = '';
@@ -176,7 +178,6 @@ class Experience {
             this.chat = new Chat(chosenName);
             this.voice = new VoiceChat(chosenName);
 
-            // Multiplayer: conecta com os outros jogadores da mesma sala
             this.multiplayer = new MultiplayerManager({
                 scene: this.scene,
                 playerName: chosenName,
@@ -233,14 +234,12 @@ class Experience {
             return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
         };
 
-        // Esc com o mouse preso: o navegador solta o mouse e avisa por este evento
         document.addEventListener('pointerlockchange', () => {
             if (document.pointerLockElement) return;
             if (!this.started || this.paused || window.__loftFrozen || isTyping()) return;
             this.pause();
         });
 
-        // Esc sem o mouse preso (capture = roda antes do quadro/chat tratarem a tecla)
         window.addEventListener('keydown', (e) => {
             if (e.key !== 'Escape' || e.repeat) return;
             if (!this.started || this.paused || window.__loftFrozen || isTyping()) return;
@@ -283,7 +282,8 @@ class Experience {
     render() {
         if (!this.started) return;
 
-        const deltaTime = this.clock.getDelta();
+        // Trava o deltaTime em 0.1s para evitar saltos em engasgos no celular
+        const deltaTime = Math.min(this.clock.getDelta(), 0.1);
 
         if (!this.paused) {
             this.player.update(deltaTime);
@@ -293,7 +293,6 @@ class Experience {
             this.meetingRoom.update(this.player.group.position);
         }
 
-        // Envia a minha posição e move os outros jogadores
         if (this.multiplayer) {
             const p = this.player.group.position;
             this.multiplayer.update(deltaTime, {

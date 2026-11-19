@@ -2,13 +2,17 @@ import * as THREE from 'three';
 import { Peer } from 'peerjs';
 
 const AVATAR_COLORS = [
-    0xd71920, // vermelho accent
-    0x1c71d8, // azul
-    0x2ec27e, // verde
-    0xe5a50a, // amarelo
-    0x9141ac, // roxo
-    0xff7800  // laranja
+    0xd71920,
+    0x1c71d8,
+    0x2ec27e,
+    0xe5a50a,
+    0x9141ac,
+    0xff7800
 ];
+
+const isMobileDevice = () =>
+    typeof window !== 'undefined' &&
+    (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
 
 function colorFromName(str) {
     let hash = 0;
@@ -20,49 +24,47 @@ function colorFromName(str) {
 
 function makeNameSprite(name, bubbleText = '') {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 192;
+    canvas.width = 384;
+    canvas.height = 144;
     const ctx = canvas.getContext('2d');
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Balão de fala temporário quando a pessoa manda mensagem no chat
     if (bubbleText) {
         const trimmed = bubbleText.length > 34 ? bubbleText.slice(0, 33) + '…' : bubbleText;
-        ctx.font = '600 24px "Segoe UI", sans-serif';
-        const bw = Math.min(480, ctx.measureText(trimmed).width + 36);
+        ctx.font = '600 18px "Segoe UI", sans-serif';
+        const bw = Math.min(360, ctx.measureText(trimmed).width + 28);
         const bx = (canvas.width - bw) / 2;
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
         ctx.beginPath();
-        ctx.roundRect(bx, 14, bw, 48, 14);
+        ctx.roundRect(bx, 10, bw, 36, 10);
         ctx.fill();
 
         ctx.fillStyle = '#111318';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(trimmed, canvas.width / 2, 38);
+        ctx.fillText(trimmed, canvas.width / 2, 28);
     }
 
-    // Placa com o nome do jogador
-    ctx.font = '700 30px "Segoe UI", sans-serif';
+    ctx.font = '700 23px "Segoe UI", sans-serif';
     const textW = ctx.measureText(name).width;
-    const pillW = Math.min(460, textW + 44);
+    const pillW = Math.min(345, textW + 34);
     const pillX = (canvas.width - pillW) / 2;
 
-    ctx.fillStyle = 'rgba(12, 13, 16, 0.82)';
+    ctx.fillStyle = 'rgba(12, 13, 16, 0.85)';
     ctx.beginPath();
-    ctx.roundRect(pillX, 82, pillW, 54, 16);
+    ctx.roundRect(pillX, 62, pillW, 40, 12);
     ctx.fill();
 
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
     ctx.fillStyle = '#f2f3f5';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(name, canvas.width / 2, 109);
+    ctx.fillText(name, canvas.width / 2, 82);
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.needsUpdate = true;
@@ -73,7 +75,7 @@ function makeNameSprite(name, bubbleText = '') {
     return sprite;
 }
 
-function createGeometricAvatar(name, colorHex) {
+function createGeometricAvatar(name, colorHex, castShadow = true) {
     const root = new THREE.Group();
 
     const bodyMat = new THREE.MeshStandardMaterial({
@@ -93,32 +95,27 @@ function createGeometricAvatar(name, colorHex) {
         roughness: 0.2
     });
 
-    // Tronco geométrico (cápsula)
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.58, 8, 16), bodyMat);
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.58, 4, 10), bodyMat);
     torso.position.y = 0.86;
-    torso.castShadow = true;
+    torso.castShadow = castShadow;
     root.add(torso);
 
-    // Cabeça geométrica
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.34, 0.36), darkMat);
     head.position.y = 1.56;
-    head.castShadow = true;
+    head.castShadow = castShadow;
     root.add(head);
 
-    // Visor frontal (-Z é a direção para onde o jogador olha)
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.09, 0.04), visorMat);
     visor.position.set(0, 1.57, -0.18);
     root.add(visor);
 
-    // Mãos geométricas laterais
-    const handGeo = new THREE.SphereGeometry(0.085, 12, 12);
+    const handGeo = new THREE.SphereGeometry(0.085, 8, 8);
     const leftHand = new THREE.Mesh(handGeo, bodyMat);
     leftHand.position.set(-0.38, 0.88, -0.08);
     const rightHand = new THREE.Mesh(handGeo, bodyMat);
     rightHand.position.set(0.38, 0.88, -0.08);
     root.add(leftHand, rightHand);
 
-    // Nome flutuante
     const label = makeNameSprite(name);
     root.add(label);
 
@@ -128,6 +125,7 @@ function createGeometricAvatar(name, colorHex) {
 export class MultiplayerManager {
     constructor({ scene, playerName, chat, onCountChange, initialState }) {
         this.scene = scene;
+        this.isMobile = isMobileDevice();
         this.playerName = playerName;
         this.playerColor = colorFromName(playerName);
         this.chat = chat;
@@ -140,12 +138,13 @@ export class MultiplayerManager {
         this.peer = null;
         this.isHost = false;
         this.myId = '';
-        this.hostConn = null;          // usado se for convidado
-        this.guestConns = new Map();   // peerId -> DataConnection (usado se for host)
-        this.roster = new Map();       // peerId -> { id, name, color, state }
-        this.avatars = new Map();      // peerId -> { root, targetPos, targetYaw, ... }
+        this.hostConn = null;
+        this.guestConns = new Map();
+        this.roster = new Map();
+        this.avatars = new Map();
 
         this.sendTimer = 0;
+        this.sendInterval = this.isMobile ? 1 / 20 : 1 / 30;
         this.destroyed = false;
         this.retryTimer = null;
 
@@ -156,7 +155,6 @@ export class MultiplayerManager {
         this.connect();
     }
 
-    // Sala única: todo mundo que abrir o link cai no "loft-principal"
     static getRoomId() {
         return 'loft-principal';
     }
@@ -165,7 +163,6 @@ export class MultiplayerManager {
         if (this.destroyed) return;
         this.cleanupPeer();
 
-        // Tenta entrar como Host da sala primeiro
         const peer = new Peer(this.hostPeerId);
         this.peer = peer;
 
@@ -189,7 +186,6 @@ export class MultiplayerManager {
 
         peer.on('error', (err) => {
             if (this.destroyed) return;
-            // Se o ID do host já existe, o amigo já criou a sala -> entra como convidado
             if (err.type === 'unavailable-id') {
                 this.connectAsGuest();
             } else if (err.type === 'peer-unavailable') {
@@ -228,7 +224,6 @@ export class MultiplayerManager {
 
             conn.on('close', () => {
                 if (this.destroyed) return;
-                // Se o host sair, limpa avatares antigos e tenta assumir a sala
                 this.clearAllAvatars();
                 this.roster.clear();
                 this.updateOnlineCount();
@@ -267,13 +262,11 @@ export class MultiplayerManager {
                     this.chat.system(`${info.name} entrou na sala.`);
                 }
 
-                // Envia para o recém-chegado todos que já estão na sala
                 conn.send({
                     type: 'welcome',
                     players: Array.from(this.roster.values())
                 });
 
-                // Avisa os demais convidados
                 this.broadcastFromHost({ type: 'join', player: info }, msg.id);
             } else if (msg.type === 'state') {
                 const entry = this.roster.get(msg.id);
@@ -356,7 +349,7 @@ export class MultiplayerManager {
     broadcastFromHost(payload, excludeId = null) {
         for (const [pid, conn] of this.guestConns.entries()) {
             if (pid !== excludeId && conn.open) {
-                try { conn.send(payload); } catch (e) { /* ignora falha pontual */ }
+                try { conn.send(payload); } catch (e) { /* ignora */ }
             }
         }
     }
@@ -381,7 +374,7 @@ export class MultiplayerManager {
         if (!playerInfo || playerInfo.id === this.myId) return;
         let av = this.avatars.get(playerInfo.id);
         if (!av) {
-            const meshData = createGeometricAvatar(playerInfo.name, playerInfo.color);
+            const meshData = createGeometricAvatar(playerInfo.name, playerInfo.color, !this.isMobile);
             const s = playerInfo.state || { x: 0, y: 0, z: 6, yaw: 0, isSitting: false };
             meshData.root.position.set(s.x, s.y, s.z);
             meshData.root.rotation.y = s.yaw || 0;
@@ -412,9 +405,7 @@ export class MultiplayerManager {
             av = this.avatars.get(id);
         }
         if (!av) return;
-        // Estima a velocidade do outro jogador pelos dois últimos pacotes.
-        // Entre um pacote e outro o avatar continua andando nessa direção,
-        // em vez de esperar parado e "pular" quando a próxima posição chega.
+
         const now = performance.now();
         const gap = (now - av.lastStateTime) / 1000;
         if (gap > 0.005 && gap < 0.5) {
@@ -445,7 +436,7 @@ export class MultiplayerManager {
 
         av.label = makeNameSprite(av.name, text);
         av.root.add(av.label);
-        av.bubbleTimer = 5.0; // balão fica visível por 5 segundos
+        av.bubbleTimer = 5.0;
     }
 
     removeAvatar(id) {
@@ -467,9 +458,8 @@ export class MultiplayerManager {
     }
 
     update(dt, localState) {
-        // 1. Envia nossa posição 30x por segundo
         this.sendTimer += dt;
-        if (this.sendTimer >= 1 / 30 && this.myId && localState) {
+        if (this.sendTimer >= this.sendInterval && this.myId && localState) {
             this.sendTimer = 0;
             if (this.isHost) {
                 const me = this.roster.get(this.myId);
@@ -482,28 +472,23 @@ export class MultiplayerManager {
             }
         }
 
-        // 2. Suaviza movimento dos avatares remotos
-        const lerpAlpha = 1 - Math.exp(-dt * 20);   // suavização independente da taxa de quadros
+        const lerpAlpha = 1 - Math.exp(-dt * 20);
         for (const av of this.avatars.values()) {
-            // posição prevista = última posição recebida + velocidade * tempo desde o pacote
             av.sinceState += dt;
             const ahead = Math.min(av.sinceState, 0.1);
             av.predicted.copy(av.targetPos).addScaledVector(av.vel, ahead);
 
-            // teletransporte (ex.: sentou, reconectou): não desliza, vai direto
             if (av.root.position.distanceTo(av.predicted) > 5) {
                 av.root.position.copy(av.predicted);
             }
             av.root.position.lerp(av.predicted, lerpAlpha);
             const moving = av.vel.lengthSq() > 0.09;
 
-            // Interpolação angular pelo menor arco
             let diff = av.targetYaw - av.root.rotation.y;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
             av.root.rotation.y += diff * lerpAlpha;
 
-            // Animação leve das mãos ao andar
             if (moving && !av.isSitting) {
                 av.walkPhase += dt * 11;
                 av.leftHand.position.z = -0.08 + Math.sin(av.walkPhase) * 0.12;
@@ -513,7 +498,6 @@ export class MultiplayerManager {
                 av.rightHand.position.z = -0.08;
             }
 
-            // Limpa balão de fala após 5s
             if (av.bubbleTimer > 0) {
                 av.bubbleTimer -= dt;
                 if (av.bubbleTimer <= 0) {
