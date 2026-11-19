@@ -7,21 +7,21 @@ import { ProjectorScreen } from './ProjectorScreen.js';
 import { MeetingRoom } from './MeetingRoom.js';
 import { Chat } from './Chat.js';
 import { VoiceChat } from './VoiceChat.js';
+import { MultiplayerManager } from './Multiplayer.js';
 
 class Experience {
     constructor() {
         this.container = document.getElementById('app');
         this.prompt = document.getElementById('audio-prompt');
         this.started = false;
+        this.paused = false;
 
         this.scene = new THREE.Scene();
-        // sky (the loft now opens onto a balcony + beach)
         this.scene.background = new THREE.Color(0x87b5dd);
         this.scene.fog = new THREE.FogExp2(0x87b5dd, 0.006);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        // Um limite moderado de DPR reduz o custo de GPU em telas de alta densidade.
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -41,7 +41,6 @@ class Experience {
     }
 
     async init() {
-        // mostra qualquer erro na tela (antes de montar o resto)
         window.addEventListener('error', (e) => this.showError(e.message));
         window.addEventListener('unhandledrejection', (e) => this.showError(String(e.reason && e.reason.stack || e.reason)));
 
@@ -52,7 +51,6 @@ class Experience {
             return;
         }
         this.ready = true;
-        // Pré-compila shaders em segundo plano para reduzir a primeira travada ao entrar.
         if (typeof this.renderer.compileAsync === 'function') {
             this.renderer.compileAsync(this.scene, this.cameraManager.camera)
                 .catch((err) => console.warn('Pré-compilação gráfica ignorada:', err));
@@ -60,37 +58,77 @@ class Experience {
     }
 
     build() {
-        // Initialize Menu
         this.setupMenu();
+        this.setupPause();
 
-        // Initialize World
         this.world = new World(this.scene);
 
-        // Initialize Player (world provides colliders + walkable heights)
         this.player = new Player(this.scene);
         this.player.world = this.world;
-        this.player.group.position.set(0, 0, 6);   // espaço livre no meio do loft
+        this.player.group.position.set(0, 0, 6);
 
-        // Initialize Camera and link it to the player for camera-relative movement
         this.cameraManager = new CameraManager(this.scene, this.player, this.renderer.domElement);
         this.player.camera = this.cameraManager.camera;
 
-        // Initialize TV Pyramid
-        // TV pyramid in the room corner (registers its own collider)
         this.tvPyramid = new TVPyramid(this.scene, new THREE.Vector3(-6.8, 0, 7.5), this.world.colliders);
         this.tvPyramid.setListener(this.cameraManager.camera);
 
-        // projector screen on the left wall (E to mirror the notebook)
         this.projector = new ProjectorScreen(this.scene);
 
-        // sala de reuniao atras da porta (z=-10) com o quadro branco desenhável
         this.meetingRoom = new MeetingRoom(this.scene, this.world);
         this.world.meetingRoom = this.meetingRoom;
-        // A TV da sala de reunião compartilha a mesma fonte de transmissão do projetor.
         this.projector.addMirrorScreen(this.meetingRoom.transmissionScreen);
 
-        // Chat e voz são iniciados depois que o visitante confirma o apelido no menu.
         window.addEventListener('resize', () => this.onWindowResize());
+
+        // Fecha a conexão com os outros jogadores ao sair da página
+        window.addEventListener('beforeunload', () => {
+            if (this.multiplayer) this.multiplayer.disconnect();
+        });
+    }
+
+    // Copia o link da sala e mostra um aviso curto no próprio botão
+    async copyInviteLink(button, originalLabel) {
+        const inviteUrl = new URL(window.location.href);
+        inviteUrl.hash = '';
+        // mantém ?sala=... se existir, para o amigo cair na mesma sala
+        const link = inviteUrl.toString();
+
+        const fallbackCopy = (value) => {
+            const field = document.createElement('textarea');
+            field.value = value;
+            field.setAttribute('readonly', '');
+            field.style.position = 'fixed';
+            field.style.left = '-9999px';
+            field.style.top = '0';
+            document.body.appendChild(field);
+            field.focus();
+            field.select();
+            field.setSelectionRange(0, field.value.length);
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+            field.remove();
+            return ok;
+        };
+
+        let copied = false;
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(link);
+                copied = true;
+            } catch (err) {
+                copied = false;
+            }
+        }
+        if (!copied) copied = fallbackCopy(link);
+
+        button.textContent = copied ? 'Link copiado!' : 'Copie o link';
+        if (!copied) window.prompt('Copie este link para convidar alguém:', link);
+
+        window.clearTimeout(button._feedbackTimer);
+        button._feedbackTimer = window.setTimeout(() => {
+            button.textContent = originalLabel;
+        }, 1800);
     }
 
     setupMenu() {
@@ -99,6 +137,7 @@ class Experience {
         const btnInvite = document.getElementById('btn-invite');
         const nameInput = document.getElementById('player-name');
         this.loadingOverlay = document.getElementById('start-loading');
+        this.onlineBadge = document.getElementById('chat-online');
 
         try {
             nameInput.value = sessionStorage.getItem('loft-nome') || '';
@@ -115,29 +154,36 @@ class Experience {
             }
             nameInput.setCustomValidity('');
             try { sessionStorage.setItem('loft-nome', chosenName); } catch (err) { /* opcional */ }
+
             this.chat = new Chat(chosenName);
             this.voice = new VoiceChat(chosenName);
+
+            // Multiplayer: conecta com os outros jogadores da mesma sala
+            this.multiplayer = new MultiplayerManager({
+                scene: this.scene,
+                playerName: chosenName,
+                chat: this.chat,
+                onCountChange: (n) => {
+                    if (this.onlineBadge) this.onlineBadge.textContent = `${n} online`;
+                }
+            });
+
             this.started = true;
             if (this.loadingOverlay) this.loadingOverlay.classList.add('active');
             btnStart.disabled = true;
             menu.style.display = 'none';
             this.container.classList.add('visible');
 
-            // Force resize to ensure the canvas fills the screen correctly
             this.onWindowResize();
 
-            // Unlock audio and start music only now
             this.player.unlockAudio();
             try { this.tvPyramid.playAudio(); } catch (e) { console.warn(e); }
-            this.cameraManager.lock();   // prende o mouse para olhar em volta
+            this.cameraManager.lock();
 
-            // Remove the old prompt since we have a menu
             if (this.prompt) this.prompt.classList.add('hidden');
 
-            // Evita um delta enorme caso o menu tenha ficado aberto por muito tempo.
             this.clock.getDelta();
 
-            // Dá ao navegador um instante para pintar o indicador antes do primeiro frame 3D.
             setTimeout(() => {
                 this.clock.getDelta();
                 this.render();
@@ -150,52 +196,66 @@ class Experience {
             if (e.key === 'Enter') startExperience();
         });
 
-        btnInvite.addEventListener('click', async () => {
-            // Usa a URL real da hospedagem (inclusive o subcaminho do GitHub Pages).
-            const inviteUrl = new URL(window.location.href);
-            inviteUrl.search = '';
-            inviteUrl.hash = '';
-            const link = inviteUrl.toString();
+        btnInvite.addEventListener('click', () => this.copyInviteLink(btnInvite, 'Convidar'));
+    }
 
-            const fallbackCopy = (value) => {
-                const field = document.createElement('textarea');
-                field.value = value;
-                field.setAttribute('readonly', '');
-                field.style.position = 'fixed';
-                field.style.left = '-9999px';
-                field.style.top = '0';
-                document.body.appendChild(field);
-                field.focus();
-                field.select();
-                field.setSelectionRange(0, field.value.length);
-                let copied = false;
-                try { copied = document.execCommand('copy'); } catch (err) { copied = false; }
-                field.remove();
-                return copied;
-            };
+    setupPause() {
+        this.pauseMenu = document.getElementById('pause-menu');
+        const btnPause = document.getElementById('btn-pause');
+        const btnResume = document.getElementById('btn-resume');
+        const btnPauseInvite = document.getElementById('btn-pause-invite');
+        const btnExit = document.getElementById('btn-exit-menu');
+        const roomLabel = document.getElementById('pause-room-label');
 
-            let copied = false;
-            if (navigator.clipboard && window.isSecureContext) {
-                try {
-                    await navigator.clipboard.writeText(link);
-                    copied = true;
-                } catch (err) {
-                    copied = false;
-                }
-            }
-            if (!copied) copied = fallbackCopy(link);
+        if (roomLabel) roomLabel.textContent = 'Sala: ' + MultiplayerManager.getRoomId();
 
-            const originalLabel = 'Convidar';
-            btnInvite.textContent = copied ? 'Link copiado!' : 'Copie o link';
-            if (!copied) {
-                // Último recurso caso o navegador bloqueie as duas formas de cópia.
-                window.prompt('Copie este link para convidar alguém:', link);
-            }
-            window.clearTimeout(this.inviteFeedbackTimer);
-            this.inviteFeedbackTimer = window.setTimeout(() => {
-                btnInvite.textContent = originalLabel;
-            }, 1800);
+        const isTyping = () => {
+            const el = document.activeElement;
+            return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+        };
+
+        // Botão "Pausar" do HUD
+        btnPause.addEventListener('click', () => this.pause());
+
+        // Esc com o mouse preso: o navegador solta o mouse e avisa por este evento
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement) return;
+            if (!this.started || this.paused || window.__loftFrozen || isTyping()) return;
+            this.pause();
         });
+
+        // Esc sem o mouse preso (capture = roda antes do quadro/chat tratarem a tecla)
+        window.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape' || e.repeat) return;
+            if (!this.started || this.paused || window.__loftFrozen || isTyping()) return;
+            this.pause();
+        }, true);
+
+        btnResume.addEventListener('click', () => this.resume());
+        btnPauseInvite.addEventListener('click', () => this.copyInviteLink(btnPauseInvite, 'Copiar link da sala'));
+        btnExit.addEventListener('click', () => {
+            if (this.multiplayer) this.multiplayer.disconnect();
+            window.location.reload();
+        });
+    }
+
+    pause() {
+        if (!this.started || this.paused) return;
+        this.paused = true;
+        window.__loftFrozen = true;
+        window.dispatchEvent(new CustomEvent('loft-freeze'));
+        if (this.voice) this.voice.stopTalking();
+        if (document.pointerLockElement) document.exitPointerLock();
+        this.pauseMenu.hidden = false;
+    }
+
+    resume() {
+        if (!this.paused) return;
+        this.paused = false;
+        window.__loftFrozen = false;
+        this.pauseMenu.hidden = true;
+        this.clock.getDelta();
+        this.cameraManager.lock();
     }
 
     onWindowResize() {
@@ -209,15 +269,28 @@ class Experience {
 
         const deltaTime = this.clock.getDelta();
 
-        this.player.update(deltaTime);
-        this.cameraManager.update(deltaTime);
-        this.tvPyramid.update(this.player.group.position);
-        this.projector.update(this.player.group.position);
-        this.meetingRoom.update(this.player.group.position);
+        if (!this.paused) {
+            this.player.update(deltaTime);
+            this.cameraManager.update(deltaTime);
+            this.tvPyramid.update(this.player.group.position);
+            this.projector.update(this.player.group.position);
+            this.meetingRoom.update(this.player.group.position);
+        }
+
+        // Envia a minha posição e move os outros jogadores
+        if (this.multiplayer) {
+            const p = this.player.group.position;
+            this.multiplayer.update(deltaTime, {
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                yaw: this.cameraManager.yaw,
+                isSitting: this.player.isSitting
+            });
+        }
 
         this.renderer.render(this.scene, this.cameraManager.camera);
 
-        // O primeiro frame 3D já foi desenhado; libera o indicador de carregamento.
         if (this.loadingOverlay && this.loadingOverlay.classList.contains('active')) {
             this.loadingOverlay.classList.remove('active');
         }
